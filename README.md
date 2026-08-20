@@ -290,6 +290,12 @@ live-order guard, all three bot stop conditions, and the CLI.
 
 The suite never touches the network — synthetic data and monkeypatched brokers throughout.
 
+CI ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) runs the suite on Python 3.11,
+3.12 and 3.13, then exercises the whole pipeline end to end — train, backtest, compare, validate,
+replay, and a paper-broker session — against `--source synthetic`, so a run can never fail because
+a market data provider was slow or the exchange was closed. Generated charts and tables are uploaded
+as build artifacts.
+
 ---
 
 ## Project layout

@@ -1,0 +1,92 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A second push to the same branch cancels the run still in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run test suite
+        # The suite never touches the network: synthetic bars and monkeypatched
+        # brokers throughout, so no Dhan credentials are needed here.
+        run: python -m pytest tests/ -q
+
+  pipeline:
+    name: end-to-end smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # --source synthetic keeps CI off Dhan and Yahoo entirely, so a run can
+      # never fail because a market data provider was slow, rate-limiting, or
+      # closed for a holiday. The generated series is deterministic.
+      - name: Train the Random Forest
+        run: python -m algobot.cli train --symbol CITEST --period 5y --source synthetic
+
+      - name: Backtest every strategy
+        run: python -m algobot.cli paper-run --symbol CITEST --period 5y --source synthetic
+
+      - name: Backtest with the model filter
+        run: python -m algobot.cli compare --symbol CITEST --source synthetic
+
+      - name: Permutation test
+        run: python -m algobot.cli validate --symbol CITEST --source synthetic --trials 25
+
+      - name: Replay the live bot loop
+        run: |
+          python -m algobot.cli replay --symbol CITEST --strategy multiple \
+            --source synthetic --bars 100 --use-model
+
+      - name: Paper-broker session
+        run: |
+          python -m algobot.cli trade --symbol CITEST --strategy ma --broker sim \
+            --source synthetic --iterations 3 --poll 0 --ignore-market-hours
+
+      - name: Upload generated artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-artifacts
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 7
