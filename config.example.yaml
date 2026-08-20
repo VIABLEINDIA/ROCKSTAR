@@ -37,7 +37,13 @@ backtest:
 bot:
   symbol: RELIANCE
   exchange_segment: NSE_EQ
-  product_type: INTRADAY    # INTRADAY | CNC | MARGIN
+  # CNC (delivery) suits the daily-bar strategies here, which hold ~40 days on
+  # average. INTRADAY (MIS) is auto-squared-off by Dhan the same afternoon, so
+  # only choose it with intraday bars and strategy windows tuned to match.
+  product_type: CNC         # CNC | INTRADAY | MARGIN
+  auto_square_off: true     # flatten before Dhan's ~15:20 cutoff (INTRADAY only)
+  square_off_time: "15:15"
+  no_new_entries_after: "15:00"
   strategy: ma
   quantity: 10
   poll_seconds: 60

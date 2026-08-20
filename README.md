@@ -266,16 +266,39 @@ Each iteration of the loop:
 
 1. **Stop signal?** — `Ctrl-C`, `bot.request_stop()`, or creating the `STOP` file.
 2. **Market open?** — NSE cash session, 09:15–15:30 IST, weekdays.
-3. **Risk check** — per-position stop-loss, then session stop-loss / take-profit / trade cap.
+3. **Square-off due?** — when trading INTRADAY, flatten at `square_off_time` and halt.
+4. **Risk check** — per-position stop-loss, then session stop-loss / take-profit / trade cap.
    Any breach flattens the position and halts.
-4. **Market view** — rebuild signals from fresh bars; ask the model for its forecast.
-5. **Act** — enter, exit, or hold.
+5. **Market view** — rebuild signals from fresh bars; ask the model for its forecast.
+6. **Act** — enter, exit, or hold.
 
 Those are the paper's three stop conditions: *stop loss reached, market closed, or user stop signal*.
 Every decision is appended to `artifacts/<SYMBOL>_bot_journal.json`.
 
 Backtests execute a bar-*t* signal at the **open of bar t+1** — never the same bar's close, which
 would leak information the strategy could not have had.
+
+### Product type: this is positional, not intraday
+
+Every strategy here runs on **daily** bars, and across all 527 backtested trades the mean holding
+period is **39.9 days** — not one closed inside a single session. So orders go out as **CNC**
+(delivery) by default.
+
+Sending them as `INTRADAY` (MIS) would put the order type in direct conflict with the strategy:
+Dhan force-closes MIS positions around 15:20 IST, so a trade meant to run for weeks would be
+liquidated the same afternoon, every afternoon.
+
+If you do choose `--product-type INTRADAY` — with intraday bars and strategy windows retuned to
+match — the bot manages the session itself rather than leaving it to the broker:
+
+| Setting | Default | Behaviour |
+|---|---|---|
+| `no_new_entries_after` | 15:00 IST | Stops opening positions too late in the session to manage |
+| `square_off_time` | 15:15 IST | Flattens and halts, ahead of Dhan's ~15:20 cutoff |
+| `auto_square_off` | `true` | `--no-square-off` hands control back to Dhan's force-close |
+
+If the market closes while a position is still open, the bot logs it as an **error** under
+`INTRADAY` (Dhan will close it at a price of its choosing) and as routine information under CNC.
 
 ---
 
@@ -285,7 +308,7 @@ would leak information the strategy could not have had.
 python -m pytest tests/ -q
 ```
 
-139 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
+161 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
 regime shift, look-ahead leakage in every strategy, execution timing, stop-loss and slippage
 mechanics, strike-rate/profit maths, model persistence, the DhanHQ v2 order-body contract, the
 live-order guard, all three bot stop conditions, and the CLI.
@@ -312,7 +335,7 @@ algobot/
   backtest/            execution engine, Tables 3-6 reporting, permutation test
   broker/              base interface, DhanHQ v2 client, simulated + replay brokers
   bot/                 live trading loop and risk guards
-tests/                 139 tests
+tests/                 161 tests
 artifacts/             generated charts, tables, journals  (git-ignored)
 models/                joblib bundles                      (git-ignored)
 cache/                 downloaded bars, scrip master, paper ledger (git-ignored)

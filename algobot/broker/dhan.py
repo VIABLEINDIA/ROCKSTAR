@@ -34,6 +34,10 @@ NSE_OPEN = time(9, 15)
 NSE_CLOSE = time(15, 30)
 IST = "Asia/Kolkata"
 
+# Approximate time Dhan force-closes MIS (INTRADAY) positions. The bot squares
+# off ahead of this so the exit price is its own decision, not the broker's.
+NSE_MIS_AUTO_SQUARE_OFF = time(15, 20)
+
 
 def now_ist() -> datetime:
     return pd.Timestamp.now(tz=IST).to_pydatetime()
@@ -49,6 +53,23 @@ def is_nse_session(ts: datetime | None = None) -> bool:
     if ts.weekday() >= 5:
         return False
     return NSE_OPEN <= ts.time() <= NSE_CLOSE
+
+
+def parse_ist_time(value: str) -> time:
+    """Parse "HH:MM" (or "HH:MM:SS") into a time, for the square-off cutoffs."""
+    parts = [int(p) for p in str(value).strip().split(":")]
+    if not 2 <= len(parts) <= 3:
+        raise ValueError(f"Expected HH:MM or HH:MM:SS, got {value!r}")
+    return time(*parts)
+
+
+def is_at_or_after(cutoff: str | time, ts: datetime | None = None) -> bool:
+    """True once the IST clock has reached `cutoff` on a trading day."""
+    ts = ts or now_ist()
+    if ts.weekday() >= 5:
+        return False
+    cutoff = cutoff if isinstance(cutoff, time) else parse_ist_time(cutoff)
+    return ts.time() >= cutoff
 
 
 class DhanBroker(Broker):

@@ -308,6 +308,12 @@ def cmd_trade(args, cfg: Config) -> int:
     bot_cfg.broker = args.broker
     bot_cfg.use_model = args.use_model
     bot_cfg.model_path = args.model
+    if args.product_type:
+        bot_cfg.product_type = args.product_type.upper()
+    if args.square_off_time:
+        bot_cfg.square_off_time = args.square_off_time
+    if args.no_square_off:
+        bot_cfg.auto_square_off = False
     if args.poll is not None:
         bot_cfg.poll_seconds = args.poll
     if args.day_stop_loss is not None:
@@ -317,6 +323,13 @@ def cmd_trade(args, cfg: Config) -> int:
 
     bot = TradingBot(broker, bot_cfg, strategy_params=_strategy_params(args))
     print(f"\nTrading {bot_cfg.symbol} with {bot.strategy.describe()} via {broker.name}")
+    if bot.is_intraday:
+        detail = (f"square-off {bot_cfg.square_off_time} IST, no new entries after "
+                  f"{bot_cfg.no_new_entries_after} IST" if bot_cfg.auto_square_off
+                  else "square-off DISABLED -- Dhan will force-close at its own price")
+    else:
+        detail = "positions carried overnight"
+    print(f"Product: {bot_cfg.product_type} | {detail}")
     print(f"Stop the bot with Ctrl-C or: touch {bot_cfg.stop_file}\n")
 
     summary = bot.run(max_iterations=args.iterations)
@@ -433,6 +446,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--iterations", type=int, help="stop after N iterations")
     p.add_argument("--day-stop-loss", type=float, help="session stop as a fraction")
     p.add_argument("--trade-stop-loss", type=float, help="per-position stop as a fraction")
+    p.add_argument("--product-type", choices=["CNC", "INTRADAY", "MARGIN", "cnc", "intraday",
+                                             "margin"],
+                   help="Dhan product type (default CNC: strategies here hold ~40 days, "
+                        "and INTRADAY/MIS is auto-squared-off the same day)")
+    p.add_argument("--square-off-time", help="IST cutoff to flatten INTRADAY positions")
+    p.add_argument("--no-square-off", action="store_true",
+                   help="disable the intraday square-off (Dhan will force-close instead)")
     p.add_argument("--dry-run", action="store_true", help="log orders instead of sending them")
     p.add_argument("--ignore-market-hours", action="store_true",
                    help="sim broker only: trade outside the NSE session")

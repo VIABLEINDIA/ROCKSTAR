@@ -33,6 +33,7 @@ from ..broker.base import Broker, Position
 from ..config import ARTIFACT_DIR, BotConfig
 from ..model.random_forest import TrainedModel, default_model_path
 from ..strategies.base import EXIT, FLAT, LONG
+from ..broker.dhan import is_at_or_after, now_ist
 from ..strategies.registry import Strategy, build_strategy, wrap_with_model
 from .risk import RiskState
 
@@ -111,6 +112,39 @@ class TradingBot:
             except (ValueError, OSError):
                 pass    # not on the main thread (e.g. under a test runner)
 
+    # ------------------------------------------------------------------
+    # intraday session management
+    # ------------------------------------------------------------------
+    @property
+    def is_intraday(self) -> bool:
+        """True when orders go out as Dhan MIS, which the broker force-closes."""
+        return str(self.cfg.product_type).upper() == "INTRADAY"
+
+    def broker_now(self) -> datetime:
+        """Current time from the broker if it exposes one, else the IST clock.
+
+        ReplayBroker reports the timestamp of the bar it is standing on, so a
+        replay squares off on simulated time rather than wall-clock time.
+        """
+        ts = getattr(self.broker, "current_time", None)
+        return ts if isinstance(ts, datetime) else now_ist()
+
+    def should_square_off(self, now: datetime | None = None) -> bool:
+        """Has the intraday square-off cutoff passed?"""
+        if not (self.is_intraday and self.cfg.auto_square_off):
+            return False
+        return is_at_or_after(self.cfg.square_off_time, now or self.broker_now())
+
+    def entries_allowed(self, now: datetime | None = None) -> bool:
+        """Block new intraday entries too late in the session to manage.
+
+        Opening a position that must be closed within the hour leaves no room
+        for the trade to work and guarantees an exit at the cutoff price.
+        """
+        if not self.is_intraday:
+            return True
+        return not is_at_or_after(self.cfg.no_new_entries_after, now or self.broker_now())
+
     def request_stop(self) -> None:
         """Programmatic equivalent of the user's stop signal."""
         self._stop_requested = True
@@ -144,6 +178,7 @@ class TradingBot:
                     "symbol": self.cfg.symbol,
                     "strategy": self.strategy.describe(),
                     "broker": self.broker.name,
+                    "product_type": self.cfg.product_type,
                     "model": (self.model.symbol + " @ " + self.model.trained_at
                               if self.model else None),
                     "starting_equity": self.risk.starting_equity,
@@ -227,8 +262,27 @@ class TradingBot:
 
         # 2. market condition
         if not self.broker.is_market_open():
+            pos = self.broker.get_position(self.cfg.symbol)
+            if pos and pos.is_open:
+                # Nothing can be traded now. Flag it loudly: an MIS position
+                # left open here is closed by Dhan at its own discretion.
+                self._log_event(
+                    "error" if self.is_intraday else "info",
+                    f"Market closed while holding {pos.quantity} {self.cfg.symbol}"
+                    + (" as INTRADAY -- Dhan will auto-square-off at its own price"
+                       if self.is_intraday else " (CNC, carried overnight)"),
+                )
             self.risk.halt("market closed")
             return "market_closed"
+
+        # 2b. intraday square-off, ahead of the broker's own cutoff
+        if self.should_square_off():
+            pos = self.broker.get_position(self.cfg.symbol)
+            reason = f"intraday square-off at {self.cfg.square_off_time} IST"
+            if pos and pos.is_open:
+                self._flatten(reason, pos)
+            self.risk.halt(reason)
+            return "squared_off"
 
         # 3. account + position, then risk limits
         account = self.broker.account()
@@ -258,6 +312,11 @@ class TradingBot:
         signal_now, holding = view["signal"], bool(pos and pos.is_open)
 
         if signal_now == LONG and not holding:
+            if not self.entries_allowed():
+                self._log_event("signal", f"entry suppressed: past "
+                                          f"{self.cfg.no_new_entries_after} IST, too late to "
+                                          f"open an intraday position")
+                return "entry_blocked"
             self._enter(view["close"], view)
             return "entered"
 
@@ -283,7 +342,7 @@ class TradingBot:
             while not self.risk.halted:
                 status = self.step()
                 iterations += 1
-                if status in ("stopped", "market_closed", "halted"):
+                if status in ("stopped", "market_closed", "halted", "squared_off"):
                     break
                 if max_iterations and iterations >= max_iterations:
                     self._log_event("info", f"Reached max_iterations={max_iterations}")

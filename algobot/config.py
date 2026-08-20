@@ -83,7 +83,28 @@ class BotConfig:
 
     symbol: str = "RELIANCE"
     exchange_segment: str = "NSE_EQ"
-    product_type: str = "INTRADAY"       # INTRADAY | CNC | MARGIN
+    product_type: str = "CNC"            # CNC (delivery) | INTRADAY (MIS) | MARGIN
+    """Dhan product type for orders.
+
+    CNC is the default because every strategy here runs on daily bars and holds
+    for ~40 days on average. Sending those orders as INTRADAY (MIS) would have
+    Dhan auto-square-off the position the same afternoon, so the order type
+    would silently contradict the strategy's own exit logic.
+
+    Set INTRADAY only alongside intraday bars (`data.interval`) and strategy
+    windows tuned for them; `auto_square_off` then applies.
+    """
+
+    auto_square_off: bool = True
+    """Flatten before the session ends when trading INTRADAY.
+
+    Dhan force-closes MIS positions itself around 15:20 IST, at whatever price
+    the book offers. Squaring off first keeps the exit under the bot's control
+    and inside its own journal.
+    """
+
+    square_off_time: str = "15:15"        # IST, ahead of Dhan's ~15:20 MIS cutoff
+    no_new_entries_after: str = "15:00"   # IST, stop opening what must close today
     strategy: str = "ma"
     quantity: int = 10
     poll_seconds: int = 60
