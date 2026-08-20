@@ -10,6 +10,7 @@ deterministic synthetic generator so the pipeline stays runnable offline
 from __future__ import annotations
 
 import logging
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -70,7 +71,10 @@ def load_synthetic(
     downstream stage (training, backtests, the bot's sim broker) stays usable
     without a network connection.
     """
-    rng = np.random.default_rng(abs(hash(symbol)) % (2**32) ^ seed)
+    # zlib.crc32, not hash(): Python salts string hashing per process, so
+    # hash() would hand a different series to every run -- silently breaking
+    # the reproducibility this generator exists to provide.
+    rng = np.random.default_rng((zlib.crc32(symbol.encode("utf-8")) ^ seed) % (2**32))
     idx = pd.bdate_range(end=datetime.now(timezone.utc).date(), periods=days)
 
     # Slowly varying drift produces trending and ranging regimes, which the

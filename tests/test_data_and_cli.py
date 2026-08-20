@@ -7,7 +7,7 @@ import json
 import pandas as pd
 import pytest
 
-from algobot.config import Config, DataConfig, DhanCredentials, load_config
+from algobot.config import ROOT, Config, DataConfig, DhanCredentials, load_config
 from algobot.data.instruments import FALLBACK_SECURITY_IDS, resolve_security_id
 from algobot.data.loader import OHLCV, load_prices, load_synthetic, period_to_days, slice_period
 
@@ -30,6 +30,25 @@ def test_synthetic_bars_are_deterministic():
     a = load_synthetic("SEEDED", days=100)
     b = load_synthetic("SEEDED", days=100)
     pd.testing.assert_frame_equal(a, b)
+
+
+def test_synthetic_bars_are_deterministic_across_processes():
+    """Regression: seeding from hash() gave every process different data.
+
+    Python salts string hashing per process, so an in-process comparison
+    cannot catch this -- the value has to be pinned to a constant.
+    """
+    import subprocess
+    import sys
+
+    code = ("from algobot.data.loader import load_synthetic;"
+            "print(repr(load_synthetic('SEEDED', 10)['Close'].iloc[0]))")
+    runs = {
+        subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                       cwd=str(ROOT), check=True).stdout.strip()
+        for _ in range(2)
+    }
+    assert len(runs) == 1, f"synthetic series differs between processes: {runs}"
 
 
 def test_different_symbols_give_different_series():

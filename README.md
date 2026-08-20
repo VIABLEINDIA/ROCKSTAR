@@ -81,6 +81,7 @@ Gold Cross (`gold`).
 | `paper-run` | Reproduce Tables 3–6 across strategies and durations |
 | `compare` | Strategy alone vs strategy + RF on the *same* out-of-sample window |
 | `validate` | Permutation test — is the model skilled, or just trading less? |
+| `optimize` | Grid-search parameters; `--walk-forward` for the out-of-sample answer |
 | `replay` | Drive the real bot loop over historical bars |
 | `trade` | Run the live loop (Section IV.F) |
 | `account` | Show broker cash, equity and open position |
@@ -91,7 +92,7 @@ Run `python -m algobot.cli <command> --help` for the full flag list.
 
 ## Findings: where this reproduces the paper, and where it doesn't
 
-Five things in the paper's method do not survive contact with out-of-sample NSE data. Each is
+Six things in the paper's method do not survive contact with out-of-sample NSE data. Each is
 implemented as described *and* addressed, with the fix documented and switchable.
 
 ### 1. Training on raw price levels cannot generalise
@@ -258,6 +259,34 @@ applies to both legs and the flat DP charge is punitive on small positions.
 > is a constructor argument so it can be corrected without touching the engine. Verify against
 > Dhan's current pricing before trusting any figure.
 
+### 6. Tuning: win rate and profitability pull in opposite directions
+
+[`algobot/backtest/optimize.py`](algobot/backtest/optimize.py) grid-searches parameters, but never
+reports an in-sample fit on its own. `optimize --walk-forward` re-fits at each fold and trades the
+next one, so every reported trade comes from parameters chosen only on earlier data.
+
+Optimising for **win rate** (searching take-profit as well as the strategy windows), walk-forward
+across 3 symbols x 4 strategies:
+
+| Objective | Walk-forward win rate | Walk-forward P&L | Trades |
+|---|---|---|---|
+| Default parameters | 33.9% | −₹43,638 | 268 |
+| **Maximise win rate** | **70.91%** | **−₹37,517** | 165 |
+| Maximise profit | 28.35% | −₹23,598 | 127 |
+
+A win rate above 70% is straightforward to reach — and it is worth understanding *why* that is not
+good news. A tight take-profit converts many open positions into small recorded wins while losses
+run to the stop, so the payoff ratio collapses faster than the win rate improves. Individual results
+show the mechanism plainly: RELIANCE / Donchian tunes to an **80.6% win rate and still loses ₹936**;
+INFY / Donchian reaches **75% and loses ₹7,879**.
+
+Optimising for profit does the opposite — 28% win rate, but ₹20,040 better than untrained defaults
+over the same windows.
+
+**Win rate is not a proxy for profitability, and targeting it directly makes the system worse.**
+Neither objective produces a profitable system out-of-sample over these windows: tuning narrows the
+loss, it does not create an edge that was never there.
+
 ### Strategy results across three symbols
 
 `paper-run` output (10 shares/trade, 5% stop, strategies only — no model), **net of delivery
@@ -385,7 +414,7 @@ If the market closes while a position is still open, the bot logs it as an **err
 python -m pytest tests/ -q
 ```
 
-203 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
+227 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
 regime shift, look-ahead leakage in every strategy, execution timing, stop-loss and slippage
 mechanics, strike-rate/profit maths, model persistence, the DhanHQ v2 order-body contract, the
 live-order guard, all three bot stop conditions, and the CLI.
@@ -412,7 +441,7 @@ algobot/
   backtest/            execution engine, costs, Tables 3-6 reporting, permutation test
   broker/              base interface, DhanHQ v2 client, simulated + replay brokers
   bot/                 live trading loop and risk guards
-tests/                 203 tests
+tests/                 227 tests
 artifacts/             generated charts, tables, journals  (git-ignored)
 models/                joblib bundles                      (git-ignored)
 cache/                 downloaded bars, scrip master, paper ledger (git-ignored)

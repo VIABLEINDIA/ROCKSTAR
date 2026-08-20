@@ -262,6 +262,73 @@ def cmd_validate(args, cfg: Config) -> int:
     return 0
 
 
+def cmd_optimize(args, cfg: Config) -> int:
+    """Tune parameters, and show what survives out-of-sample."""
+    from .backtest.optimize import (PARAM_GRIDS, random_parameter_baseline,
+                                    train_test_optimize, walk_forward)
+
+    df = load_prices(cfg.data)
+    window = slice_period(df, args.period or cfg.data.period)
+    strategies = [args.strategy] if args.strategy else list(PARAM_GRIDS)
+
+    if args.walk_forward:
+        print(f"\nWalk-forward tuning on {cfg.data.symbol.upper()} "
+              f"({args.folds} folds, objective={args.objective})")
+        print("Parameters are re-fitted on everything before each fold and traded on the "
+              "fold itself.\n")
+        header = (f"{'STRATEGY':<12}{'TUNED':>14}{'DEFAULT':>14}{'DELTA':>14}"
+                  f"{'TRADES':>9}{'FOLDS WON':>11}")
+        print(header)
+        print("-" * len(header))
+        payload = []
+        for name in strategies:
+            report = walk_forward(window, name, cfg.backtest, args.objective,
+                                  n_folds=args.folds, symbol=cfg.data.symbol)
+            payload.append(report.to_dict())
+            print(f"{pretty(name)[:11]:<12}"
+                  f"{money(report.tuned_profit, cfg.backtest.currency):>14}"
+                  f"{money(report.default_profit, cfg.backtest.currency):>14}"
+                  f"{money(report.improvement, cfg.backtest.currency):>14}"
+                  f"{report.tuned_trades:>9}"
+                  f"{report.folds_improved:>7}/{len(report.folds)}")
+        out = ARTIFACT_DIR / f"{cfg.data.symbol.upper()}_walkforward.json"
+        out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"\nSaved -> {out}")
+        return 0
+
+    payload = []
+    for name in strategies:
+        report = train_test_optimize(window, name, cfg.backtest, args.objective,
+                                     train_ratio=args.train_ratio, symbol=cfg.data.symbol)
+        payload.append(report.to_dict())
+
+        print(f"\n{pretty(name)} on {cfg.data.symbol.upper()}")
+        print(f"  train {report.train_window[0]} -> {report.train_window[1]}   "
+              f"test {report.test_window[0]} -> {report.test_window[1]}")
+        print(f"  best params        {report.best_params}")
+        print(f"  in-sample          {money(report.in_sample.profit, cfg.backtest.currency)}")
+        print(f"  OUT-OF-SAMPLE      {money(report.out_of_sample.profit, cfg.backtest.currency)}")
+        print(f"  default OOS        "
+              f"{money(report.baseline_out_of_sample.profit, cfg.backtest.currency)}")
+        print(f"  improvement        {money(report.improvement, cfg.backtest.currency)}")
+        print(f"  top-10 median OOS  {money(report.robust_oos, cfg.backtest.currency)}"
+              "   (a lone good cell is a fluke; neighbours should agree)")
+
+        if args.random_baseline:
+            cut = int(len(window) * args.train_ratio)
+            base = random_parameter_baseline(window.iloc[:cut], window.iloc[cut:], name,
+                                             cfg.backtest, symbol=cfg.data.symbol)
+            pct = 100.0 * float((base["profits"] < report.out_of_sample.profit).mean())
+            print(f"  random params OOS  mean "
+                  f"{money(base['mean'], cfg.backtest.currency)}, "
+                  f"tuned beats {pct:.0f}% of {base['n']} random sets")
+
+    out = ARTIFACT_DIR / f"{cfg.data.symbol.upper()}_optimize.json"
+    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"\nSaved -> {out}")
+    return 0
+
+
 def cmd_replay(args, cfg: Config) -> int:
     from .bot.trader import replay_session
 
@@ -439,6 +506,18 @@ def build_parser() -> argparse.ArgumentParser:
     common(p, with_strategy=True)
     p.add_argument("--trials", type=int, default=200, help="random filters to sample")
     p.set_defaults(func=cmd_validate, strategy=None)
+
+    p = sub.add_parser("optimize", help="tune parameters and report what survives OOS")
+    common(p, with_strategy=True)
+    p.add_argument("--objective", default="profit",
+                   choices=["profit", "profit_factor", "sharpe", "return_per_trade"])
+    p.add_argument("--train-ratio", type=float, default=0.6)
+    p.add_argument("--walk-forward", action="store_true",
+                   help="re-optimise at each fold and trade the next (the honest test)")
+    p.add_argument("--folds", type=int, default=4)
+    p.add_argument("--random-baseline", action="store_true",
+                   help="compare against randomly chosen parameters")
+    p.set_defaults(func=cmd_optimize, strategy=None)
 
     p = sub.add_parser("replay", help="drive the live bot loop over historical bars")
     common(p, with_strategy=True)
