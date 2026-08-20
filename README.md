@@ -143,10 +143,10 @@ skill.
 Filtering trades with a model, then backtesting across a window that includes that model's training
 split, measures memorisation. On the full 10 years that inflation is large:
 
-| Multiple Strategy + RF | Strike rate | Profit |
-|---|---|---|
-| 10y window overlapping training | 63.3% | ₹20,023 |
-| Out-of-sample only | 18.8% | −₹2,478 |
+| Multiple Strategy + RF | Strike rate | Net profit | Trades |
+|---|---|---|---|
+| 10y window overlapping training | 60.6% | ₹16,253 | 109 |
+| Out-of-sample only | 18.8% | **−₹3,901** | 32 |
 
 `compare` and `paper-run --use-model` therefore trim to the model's out-of-sample period
 automatically; `--allow-in-sample` opts out and logs a warning.
@@ -156,18 +156,19 @@ automatically; `--allow-in-sample` opts out and logs a warning.
 `compare` runs each strategy with and without the RF filter over one identical out-of-sample window
 (RELIANCE, 2022-09-15 → 2026-08-20; buy & hold ₹1,305.14 over the same window):
 
-| Strategy | Profit | Profit + RF | Δ | Trades → +RF |
+| Strategy | Net profit | Net + RF | Δ | Trades → +RF |
 |---|---|---|---|---|
-| Moving Average Crossover | −₹319.38 | −₹318.36 | **+₹1.02** | 18 → 16 |
-| Donchian | ₹1,489.79 | ₹1,303.81 | −₹185.99 | 11 → 11 |
-| Multiple Strategy | −₹2,467.03 | −₹2,478.21 | −₹11.18 | 33 → 32 |
-| Gold Cross | −₹1,317.03 | −₹1,317.03 | ₹0.00 | 2 → 2 |
+| Moving Average Crossover | −₹1,113.69 | −₹1,028.29 | **+₹85.40** | 18 → 16 |
+| Donchian | ₹1,000.82 | ₹814.61 | −₹186.21 | 11 → 11 |
+| Multiple Strategy | −₹3,932.98 | −₹3,901.10 | **+₹31.88** | 33 → 32 |
+| Gold Cross | −₹1,403.70 | −₹1,403.70 | ₹0.00 | 2 → 2 |
 
-**The model improved P&L in 1 of 4 strategies.** On TCS and INFY, however, it improved **3 of 4**:
+**The model improved P&L in 2 of 4 strategies**, both by trivial amounts. On TCS and INFY it improved
+**3 of 4**:
 
 | Symbol | Buy & hold (same window) | Strategies improved by RF |
 |---|---|---|
-| RELIANCE | +₹1,305.14 | 1 of 4 |
+| RELIANCE | +₹1,305.14 | 2 of 4 |
 | TCS | −₹8,063.50 | 3 of 4 |
 | INFY | −₹3,028.00 | 3 of 4 |
 
@@ -189,10 +190,10 @@ python -m algobot.cli validate --symbol TCS --trials 200
 Permutation test -- TCS: does the RF filter beat random vetoes of equal size?
 STRATEGY        VETOED      BASE P&L     MODEL P&L   RANDOM MEAN   PCTILE       p
 ---------------------------------------------------------------------------------
-ma                2/14   Rs 8,050.45   Rs 8,441.45   Rs 6,815.07    66.0%   0.340
-donchian         19/58  Rs -3,057.60  Rs -1,830.60  Rs -3,458.29    71.5%   0.285
-multiple       102/389 Rs -11,745.40  Rs -9,287.70 Rs -10,117.60    69.5%   0.305
-gold               0/1   Rs 4,224.00   Rs 4,224.00   Rs 4,224.00     0.0%   1.000
+ma                2/14   Rs 6,805.18   Rs 7,373.00   Rs 5,746.21    66.0%   0.340
+donchian         19/58  Rs -4,616.65  Rs -3,172.35  Rs -4,854.71    71.5%   0.285
+multiple       102/389 Rs -14,644.62 Rs -12,099.86 Rs -12,895.36    69.0%   0.310
+gold               0/1   Rs 4,127.62   Rs 4,127.62   Rs 4,127.62     0.0%   1.000
 ```
 
 Across all three symbols and four strategies — **12 tests — the model beat random vetoing at
@@ -251,10 +252,10 @@ costs**, the direct analogue of the paper's Tables 3–6:
 
 | Strategy | RELIANCE 10y | TCS 10y | INFY 10y |
 |---|---|---|---|
-| Moving Average Crossover | ₹2,998 | **₹19,759** | ₹2,086 |
-| Donchian | ₹4,179 | ₹2,971 | ₹1,400 |
-| Multiple Strategy | −₹2,473 | −₹4,409 | ₹1,185 |
-| Gold Cross | ₹6,243 | ₹131 | ₹3,944 |
+| Moving Average Crossover | 28.57% / ₹2,998 | 47.73% / **₹19,759** | 39.13% / ₹2,086 |
+| Donchian | 43.24% / ₹4,179 | 50.00% / ₹2,971 | 36.36% / ₹1,400 |
+| Multiple Strategy | 26.97% / −₹2,473 | 38.96% / −₹4,409 | 36.71% / ₹1,185 |
+| Gold Cross | 57.14% / ₹6,243 | 33.33% / ₹131 | 28.57% / ₹3,944 |
 | *Buy & hold* | *₹10,819* | *₹10,237* | *₹6,223* |
 
 Only **1 of 12** net results beats buying and holding (TCS / MA Crossover). Gold Cross returns **NA** on every 1-year window, exactly as the paper
@@ -266,6 +267,30 @@ simply buying and holding the stock (TCS / MA Crossover). Second, the paper's ow
 negative on both durations, so a mixed outcome here is consistent with it. Strike rates below 50%
 are not by themselves damning — a trend-following strategy is designed to lose small and win big —
 but the profit column is what the comparison turns on.
+
+### Overall performance, net of costs
+
+Pooled across all 527 closed trades in the twelve 10-year runs:
+
+| Metric | Value |
+|---|---|
+| **Win rate** | **37.38%** (197 wins / 330 losses) |
+| **Net P&L** | **₹38,014** (gross ₹64,285 − ₹26,271 charges) |
+| Average trade | **+₹72.13** |
+| Average win | +₹1,146.28 |
+| Average loss | −₹569.10 |
+| Payoff ratio | 2.01 : 1 |
+| Profit factor | **1.20** |
+| Average cost per trade | ₹49.85 |
+| Mean 10y return on a ₹100,000 account | ~5.4% gross, **~3.2% net** |
+
+A sub-50% win rate is normal for trend-following — the 2.01:1 payoff is what makes 37% profitable.
+But the margin is thin: a profit factor of 1.20 means ₹1.20 earned per ₹1.00 lost, and the average
+trade clears its own ₹49.85 of charges by only ₹72. Slippage is still set to zero in all of the
+above; a realistic fill assumption would erode much of what remains.
+
+Read alongside the fact that only 1 of 12 runs beats buy and hold, this is a working research
+implementation, not a deployable edge.
 
 ---
 
