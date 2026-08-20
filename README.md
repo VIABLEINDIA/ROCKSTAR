@@ -1,5 +1,7 @@
 # Algorithmic Trading Bot
 
+[![tests](https://github.com/VIABLEINDIA/ROCKSTAR/actions/workflows/tests.yml/badge.svg)](https://github.com/VIABLEINDIA/ROCKSTAR/actions/workflows/tests.yml)
+
 An implementation of **"Algorithmic Trading Bot"** — Medha Mathur, Satyam Mhadalekar, Sahil Mhatre,
 Vanita Mane, *ITM Web of Conferences* **40**, 03041 (2021), ICACC-2021.
 
