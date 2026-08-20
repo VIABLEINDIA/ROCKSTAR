@@ -91,7 +91,7 @@ Run `python -m algobot.cli <command> --help` for the full flag list.
 
 ## Findings: where this reproduces the paper, and where it doesn't
 
-Four things in the paper's method do not survive contact with out-of-sample NSE data. Each is
+Five things in the paper's method do not survive contact with out-of-sample NSE data. Each is
 implemented as described *and* addressed, with the fix documented and switchable.
 
 ### 1. Training on raw price levels cannot generalise
@@ -205,20 +205,59 @@ design (no null model, no out-of-sample separation) could not have detected.
 
 Rerun any of this yourself — every number above comes from a command in this repo.
 
+### 5. Costs eat 41% of the profit
+
+The paper's tables are gross of everything ("reduced exchange costs"). On NSE
+equities the statutory charges are not a rounding error, and they are asymmetric: STT is 0.1% *per
+side* on delivery, stamp duty falls on the buy, and a DP charge hits every delivery sell.
+
+[`algobot/backtest/costs.py`](algobot/backtest/costs.py) models the full stack — brokerage, STT,
+exchange transaction charges, SEBI turnover fees, stamp duty, GST, and DP charges — applied per leg.
+`--costs delivery` (the default), `intraday`, or `none` to reproduce the paper's gross figures.
+
+Across all 12 ten-year runs:
+
+| | Gross | Charges | Net |
+|---|---|---|---|
+| Total P&L | ₹64,285 | −₹26,271 | **₹38,014** |
+| Profitable runs | 12 / 12 | | **10 / 12** |
+
+**Charges consume 41% of gross profit**, and turn two strategies from winners into losers —
+Multiple Strategy on RELIANCE goes from +₹714 to **−₹2,473**, and on TCS from +₹1,459 to
+**−₹4,409**. Both are the highest-turnover strategy in the set, which is the whole point: cost is a
+function of how often you trade.
+
+The single most useful number the model produces is the **breakeven move** — how far price must
+travel just to pay for the round trip:
+
+| Price | Delivery (CNC) | Intraday (MIS) |
+|---|---|---|
+| ₹500 | 0.517% | 0.106% |
+| ₹1,300 | 0.336% | 0.106% |
+| ₹3,000 | 0.271% | 0.106% |
+
+Any strategy whose average winning move is smaller than this cannot be profitable at any win rate.
+Delivery is the *more* expensive model here despite Dhan's zero delivery brokerage, because STT
+applies to both legs and the flat DP charge is punitive on small positions.
+
+> Rate snapshot: 2026-08. Brokerage plans, exchange charges and stamp duty all change — every rate
+> is a constructor argument so it can be corrected without touching the engine. Verify against
+> Dhan's current pricing before trusting any figure.
+
 ### Strategy results across three symbols
 
-`paper-run` output (10 shares/trade, 5% stop, strategies only — no model), the direct analogue of
-the paper's Tables 3–6:
+`paper-run` output (10 shares/trade, 5% stop, strategies only — no model), **net of delivery
+costs**, the direct analogue of the paper's Tables 3–6:
 
 | Strategy | RELIANCE 10y | TCS 10y | INFY 10y |
 |---|---|---|---|
-| Moving Average Crossover | 32.65% / ₹4,696 | 56.82% / ₹22,892 | 39.13% / ₹3,997 |
-| Donchian | 43.24% / ₹5,446 | 50.00% / ₹6,145 | 36.36% / ₹3,218 |
-| Multiple Strategy | 26.97% / ₹714 | 40.26% / ₹1,459 | 36.71% / ₹4,434 |
-| Gold Cross | 57.14% / ₹6,496 | 33.33% / ₹543 | 28.57% / ₹4,245 |
+| Moving Average Crossover | ₹2,998 | **₹19,759** | ₹2,086 |
+| Donchian | ₹4,179 | ₹2,971 | ₹1,400 |
+| Multiple Strategy | −₹2,473 | −₹4,409 | ₹1,185 |
+| Gold Cross | ₹6,243 | ₹131 | ₹3,944 |
 | *Buy & hold* | *₹10,819* | *₹10,237* | *₹6,223* |
 
-(strike rate / profit earned). Gold Cross returns **NA** on every 1-year window, exactly as the paper
+Only **1 of 12** net results beats buying and holding (TCS / MA Crossover). Gold Cross returns **NA** on every 1-year window, exactly as the paper
 reports — a 200-day average cannot form inside 250 trading days.
 
 Two things are worth noting against the paper's Section VI, which reports profits for all four
@@ -308,7 +347,7 @@ If the market closes while a position is still open, the bot logs it as an **err
 python -m pytest tests/ -q
 ```
 
-161 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
+195 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
 regime shift, look-ahead leakage in every strategy, execution timing, stop-loss and slippage
 mechanics, strike-rate/profit maths, model persistence, the DhanHQ v2 order-body contract, the
 live-order guard, all three bot stop conditions, and the CLI.
@@ -332,10 +371,10 @@ algobot/
   data/                loader (Dhan/Yahoo/synthetic), scrip master, preprocessing
   model/               Random Forest, Section V metrics, figures
   strategies/          ma, donchian, multiple, gold, indicators, RF fusion, registry
-  backtest/            execution engine, Tables 3-6 reporting, permutation test
+  backtest/            execution engine, costs, Tables 3-6 reporting, permutation test
   broker/              base interface, DhanHQ v2 client, simulated + replay brokers
   bot/                 live trading loop and risk guards
-tests/                 161 tests
+tests/                 195 tests
 artifacts/             generated charts, tables, journals  (git-ignored)
 models/                joblib bundles                      (git-ignored)
 cache/                 downloaded bars, scrip master, paper ledger (git-ignored)

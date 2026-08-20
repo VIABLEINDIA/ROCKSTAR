@@ -65,13 +65,22 @@ def format_strike(value: float) -> str:
 
 
 def strategy_table(results: list[BacktestResult], strategy: str, currency: str = "INR") -> str:
-    """One strategy across durations -- the layout of Tables 3-6."""
-    header = f"{'DURATION':<12}{'STRIKE RATE':>16}{'PROFIT EARNED':>20}{'TRADES':>9}"
+    """One strategy across durations -- the layout of Tables 3-6, plus costs.
+
+    PROFIT EARNED is net of charges; GROSS is the figure the paper reports.
+    """
+    header = (f"{'DURATION':<10}{'STRIKE RATE':>14}{'PROFIT EARNED':>18}"
+              f"{'GROSS':>16}{'CHARGES':>14}{'TRADES':>8}")
     lines = [f"{pretty(strategy)} Evaluation", "=" * len(header), header, "-" * len(header)]
     for r in results:
-        profit = "NA" if r.n_trades == 0 else money(r.profit, currency)
+        if r.n_trades == 0:
+            lines.append(f"{r.period_label:<10}{'NA':>14}{'NA':>18}{'NA':>16}{'NA':>14}{0:>8}")
+            continue
         lines.append(
-            f"{r.period_label:<12}{format_strike(r.strike_rate):>16}{profit:>20}{r.n_trades:>9}"
+            f"{r.period_label:<10}{format_strike(r.strike_rate):>14}"
+            f"{money(r.profit, currency):>18}"
+            f"{money(r.gross_profit, currency):>16}"
+            f"{money(-r.total_costs, currency):>14}{r.n_trades:>8}"
         )
     return "\n".join(lines)
 
@@ -90,6 +99,32 @@ def summary_table(results: list[BacktestResult], currency: str = "INR") -> str:
             f"{money(r.buy_and_hold_profit, currency):>16}"
             f"{r.max_drawdown_pct:>9.2f}%{r.n_trades:>8}"
         )
+    return "\n".join(lines)
+
+
+def cost_summary(results: list[BacktestResult], currency: str = "INR") -> str:
+    """What the charges did to the headline numbers."""
+    traded = [r for r in results if r.n_trades > 0]
+    if not traded:
+        return "No trades: nothing to charge."
+
+    gross = sum(r.gross_profit for r in traded)
+    charges = sum(r.total_costs for r in traded)
+    net = sum(r.profit for r in traded)
+    trades = sum(r.n_trades for r in traded)
+
+    lines = [
+        f"Transaction costs across {len(traded)} runs / {trades} trades",
+        f"  gross P&L      {money(gross, currency):>16}",
+        f"  charges        {money(-charges, currency):>16}",
+        f"  net P&L        {money(net, currency):>16}",
+        f"  cost per trade {money(charges / trades, currency):>16}",
+    ]
+    if gross > 0:
+        lines.append(f"  charges ate    {100 * charges / gross:>15.1f}% of gross profit")
+    profitable_gross = sum(1 for r in traded if r.gross_profit > 0)
+    profitable_net = sum(1 for r in traded if r.profit > 0)
+    lines.append(f"  profitable runs {profitable_gross} gross -> {profitable_net} net")
     return "\n".join(lines)
 
 

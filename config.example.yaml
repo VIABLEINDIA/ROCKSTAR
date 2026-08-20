@@ -28,7 +28,12 @@ backtest:
   quantity: 10              # shares per trade
   initial_cash: 100000.0
   currency: INR
-  commission: 0.0
+  # delivery (CNC) | intraday (MIS) | none. "none" reproduces the paper's
+  # gross tables; the defaults apply real Dhan brokerage + STT + exchange +
+  # SEBI + stamp duty + GST + DP charges. Verify rates against Dhan's current
+  # pricing before relying on them.
+  cost_model: delivery
+  commission: 0.0           # extra flat fee per order, on top of cost_model
   slippage_bps: 0.0
   stop_loss_pct: 0.05
   take_profit_pct: null

@@ -70,7 +70,15 @@ class BacktestConfig:
     quantity: int = 10           # shares per trade
     initial_cash: float = 100_000.0
     currency: str = "INR"
-    commission: float = 0.0      # "reduced exchange costs" -- paper assumes ~0
+    cost_model: str = "delivery"
+    """Transaction costs: delivery (CNC) | intraday (MIS) | none.
+
+    The paper reports gross figures ("reduced exchange costs"); `none`
+    reproduces that. On NSE equities the statutory charges are material -- STT
+    alone is 0.1% per side on delivery -- so the default applies them.
+    """
+
+    commission: float = 0.0      # extra flat fee per order, on top of cost_model
     slippage_bps: float = 0.0
     stop_loss_pct: float = 0.05  # per-trade protective stop
     take_profit_pct: float | None = None

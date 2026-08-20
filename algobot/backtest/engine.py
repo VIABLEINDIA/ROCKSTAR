@@ -14,13 +14,14 @@ Execution model
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 
 from ..config import BacktestConfig
 from ..strategies.base import EXIT, LONG, Strategy
+from .costs import ChargeBreakdown, get_cost_model
 
 
 @dataclass
@@ -32,18 +33,31 @@ class Trade:
     quantity: int
     side: str = "long"
     exit_reason: str = "signal"
+    entry_charges: ChargeBreakdown = field(default_factory=ChargeBreakdown)
+    exit_charges: ChargeBreakdown = field(default_factory=ChargeBreakdown)
 
     @property
-    def pnl(self) -> float:
+    def gross_pnl(self) -> float:
+        """P&L before transaction costs -- what the paper's tables report."""
         direction = 1 if self.side == "long" else -1
         return direction * (self.exit_price - self.entry_price) * self.quantity
 
     @property
+    def costs(self) -> float:
+        return self.entry_charges.total + self.exit_charges.total
+
+    @property
+    def pnl(self) -> float:
+        """P&L net of every charge on both legs."""
+        return self.gross_pnl - self.costs
+
+    @property
     def return_pct(self) -> float:
-        if self.entry_price == 0:
+        """Net return on the capital committed at entry."""
+        notional = abs(self.entry_price * self.quantity)
+        if notional == 0:
             return 0.0
-        direction = 1 if self.side == "long" else -1
-        return direction * (self.exit_price / self.entry_price - 1.0) * 100
+        return self.pnl / notional * 100
 
     @property
     def days_held(self) -> int:
@@ -58,6 +72,8 @@ class Trade:
             "quantity": self.quantity,
             "side": self.side,
             "exit_reason": self.exit_reason,
+            "gross_pnl": round(self.gross_pnl, 2),
+            "costs": round(self.costs, 2),
             "pnl": round(self.pnl, 2),
             "return_pct": round(self.return_pct, 3),
             "days_held": self.days_held,
@@ -88,6 +104,23 @@ class BacktestResult:
         return 100.0 * wins / len(self.trades)
 
     # --- supporting statistics -----------------------------------------
+    @property
+    def gross_profit(self) -> float:
+        """Total P&L before transaction costs."""
+        return float(sum(t.gross_pnl for t in self.trades))
+
+    @property
+    def total_costs(self) -> float:
+        return float(sum(t.costs for t in self.trades))
+
+    @property
+    def cost_drag_pct(self) -> float:
+        """Share of gross profit consumed by charges."""
+        gross = self.gross_profit
+        if gross <= 0:
+            return float("nan")
+        return 100.0 * self.total_costs / gross
+
     @property
     def n_trades(self) -> int:
         return len(self.trades)
@@ -158,6 +191,10 @@ class BacktestResult:
             "trades": self.n_trades,
             "strike_rate": None if np.isnan(self.strike_rate) else round(self.strike_rate, 4),
             "profit": round(self.profit, 2),
+            "gross_profit": round(self.gross_profit, 2),
+            "total_costs": round(self.total_costs, 2),
+            "cost_drag_pct": (None if np.isnan(self.cost_drag_pct)
+                              else round(self.cost_drag_pct, 2)),
             "buy_and_hold_profit": round(self.buy_and_hold_profit, 2),
             "total_return_pct": round(self.total_return_pct, 3),
             "max_drawdown_pct": round(self.max_drawdown_pct, 3),
@@ -180,6 +217,7 @@ def run_backtest(df: pd.DataFrame, strategy: Strategy, cfg: BacktestConfig | Non
                  symbol: str = "", period_label: str = "") -> BacktestResult:
     """Run `strategy` over `df` and return trades, equity curve and statistics."""
     cfg = cfg or BacktestConfig()
+    costs = get_cost_model(cfg.cost_model)
     if df.empty:
         return BacktestResult(symbol, strategy.name, [], pd.DataFrame(), cfg, period_label)
 
@@ -191,6 +229,7 @@ def run_backtest(df: pd.DataFrame, strategy: Strategy, cfg: BacktestConfig | Non
     entry_date = None
     trades: list[Trade] = []
     equity_rows: list[float] = []
+    entry_charges = ChargeBreakdown()
 
     opens = df["Open"].to_numpy(dtype=float)
     highs = df["High"].to_numpy(dtype=float)
@@ -200,19 +239,27 @@ def run_backtest(df: pd.DataFrame, strategy: Strategy, cfg: BacktestConfig | Non
     dates = df.index
 
     def close_position(i: int, price: float, reason: str) -> None:
-        nonlocal cash, position, entry_price, entry_date
+        nonlocal cash, position, entry_price, entry_date, entry_charges
         side = "long" if position > 0 else "short"
-        exit_price = _fill_price(price, "sell" if position > 0 else "buy", cfg.slippage_bps)
+        exit_side = "sell" if position > 0 else "buy"
+        exit_price = _fill_price(price, exit_side, cfg.slippage_bps)
         qty = abs(position)
-        cash += position * exit_price - cfg.commission
-        trades.append(Trade(entry_date, entry_price, dates[i], exit_price, qty, side, reason))
+
+        exit_charges = costs.charges(exit_price, qty, exit_side.upper())
+        cash += position * exit_price - exit_charges.total - cfg.commission
+        trades.append(Trade(entry_date, entry_price, dates[i], exit_price, qty, side, reason,
+                            entry_charges, exit_charges))
         position, entry_price, entry_date = 0, 0.0, None
+        entry_charges = ChargeBreakdown()
 
     def open_position(i: int, price: float, direction: int) -> None:
-        nonlocal cash, position, entry_price, entry_date
-        fill = _fill_price(price, "buy" if direction > 0 else "sell", cfg.slippage_bps)
+        nonlocal cash, position, entry_price, entry_date, entry_charges
+        entry_side = "buy" if direction > 0 else "sell"
+        fill = _fill_price(price, entry_side, cfg.slippage_bps)
         qty = cfg.quantity * direction
-        cash -= qty * fill + cfg.commission
+
+        entry_charges = costs.charges(fill, abs(qty), entry_side.upper())
+        cash -= qty * fill + entry_charges.total + cfg.commission
         position, entry_price, entry_date = qty, fill, dates[i]
 
     for i in range(len(df)):

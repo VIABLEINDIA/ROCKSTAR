@@ -21,7 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from .backtest.engine import run_backtest
-from .backtest.report import (compare_with_model, enforce_out_of_sample, money,
+from .backtest.report import (compare_with_model, cost_summary, enforce_out_of_sample, money,
                               results_frame, run_suite, strategy_table, summary_table)
 from .config import ARTIFACT_DIR, BacktestConfig, BotConfig, Config, DataConfig, load_config
 from .data.loader import load_prices, slice_period
@@ -50,6 +50,7 @@ def _apply_overrides(cfg: Config, args: argparse.Namespace) -> Config:
         ("no_cache", "data", "use_cache"),
         ("quantity", "backtest", "quantity"),
         ("stop_loss", "backtest", "stop_loss_pct"),
+        ("costs", "backtest", "cost_model"),
         ("cash", "backtest", "initial_cash"),
     ]:
         value = getattr(args, attr, None)
@@ -195,6 +196,8 @@ def cmd_paper_run(args, cfg: Config) -> int:
         print()
 
     print(summary_table(results, cfg.backtest.currency))
+    print()
+    print(cost_summary(results, cfg.backtest.currency))
     csv_path = ARTIFACT_DIR / f"{cfg.data.symbol.upper()}_summary.csv"
     results_frame(results).to_csv(csv_path, index=False)
     print(f"\nArtifacts -> {ARTIFACT_DIR}")
@@ -381,6 +384,9 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--quantity", type=int, help="shares per trade")
         p.add_argument("--cash", type=float, help="starting cash")
         p.add_argument("--stop-loss", type=float, help="per-trade stop as a fraction, e.g. 0.05")
+        p.add_argument("--costs", choices=["delivery", "intraday", "none"],
+                       help="transaction cost model (default delivery; 'none' reproduces "
+                            "the paper's gross tables)")
         if with_strategy:
             p.add_argument("--strategy", choices=sorted(REGISTRY), default="ma")
             p.add_argument("--fast", type=int)
