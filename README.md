@@ -320,7 +320,19 @@ cache/                 downloaded bars, scrip master, paper ledger (git-ignored)
 
 ---
 
+## License
+
+[MIT](LICENSE) — this implementation, © 2026.
+
+The MIT grant covers the code in this repository only. The paper it implements is a separate work by
+its authors, published under CC BY 4.0; the citation below is the appropriate way to credit it.
+DhanHQ API access is governed by Dhan's own terms.
+
+---
+
 ## Reference
 
 Mathur, M., Mhadalekar, S., Mhatre, S., Mane, V. (2021). *Algorithmic Trading Bot.*
 ITM Web of Conferences 40, 03041. https://doi.org/10.1051/itmconf/20214003041
+
+Published by EDP Sciences under the Creative Commons Attribution License 4.0.
