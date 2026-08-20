@@ -79,7 +79,25 @@ class BacktestConfig:
     """
 
     commission: float = 0.0      # extra flat fee per order, on top of cost_model
-    slippage_bps: float = 0.0
+
+    slippage_bps: float = 5.0
+    """Execution slippage per side, in basis points of the fill price.
+
+    Backtests fill at a bar's open, which assumes the trader captured a price
+    that in reality is an auction print they were not part of. 5 bps per side
+    (10 bps round trip) is a modest allowance for spread and impact on a liquid
+    NSE large-cap at small size; illiquid names and larger orders need more.
+    Set 0 to reproduce the paper's frictionless fills.
+    """
+
+    gap_through_stops: bool = True
+    """Fill a stop at the open when the bar gapped through it.
+
+    Filling every stop exactly at the stop level assumes a fill is always
+    available there, which is precisely untrue on the gap-down days that
+    trigger stops in the first place. With this on, a bar that opens beyond
+    the stop fills at the open instead -- the worse, realistic price.
+    """
     stop_loss_pct: float = 0.05  # per-trade protective stop
     take_profit_pct: float | None = None
     allow_short: bool = False

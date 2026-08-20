@@ -34,7 +34,8 @@ backtest:
   # pricing before relying on them.
   cost_model: delivery
   commission: 0.0           # extra flat fee per order, on top of cost_model
-  slippage_bps: 0.0
+  slippage_bps: 5.0         # per side; 0 reproduces the paper's frictionless fills
+  gap_through_stops: true   # a stop that gapped fills at the open, not the stop level
   stop_loss_pct: 0.05
   take_profit_pct: null
   allow_short: false

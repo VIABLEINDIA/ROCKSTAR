@@ -65,10 +65,10 @@ def test_trade_pnl_long_and_short():
 def test_signal_executes_on_the_next_bar_open():
     df = frame_from([10, 20, 30, 40])
     # Signal on bar 0 -> fill at bar 1's open (20), exit signal on bar 2 -> fill at 40.
-    # cost_model="none" isolates execution timing from transaction charges.
+    # Costs and slippage are pinned off: this test isolates execution timing.
     result = run_backtest(df, ScriptedStrategy([LONG, FLAT, EXIT, FLAT]),
                           BacktestConfig(quantity=1, stop_loss_pct=0.0, commission=0.0,
-                                         cost_model="none"))
+                                         cost_model="none", slippage_bps=0))
 
     assert result.n_trades == 1
     trade = result.trades[0]
@@ -154,7 +154,8 @@ def test_strike_rate_counts_winning_trades():
     # win then loss.
     df = frame_from([10, 20, 30, 30, 20, 20])
     result = run_backtest(df, ScriptedStrategy([LONG, FLAT, EXIT, LONG, FLAT, EXIT]),
-                          BacktestConfig(quantity=1, stop_loss_pct=0.0, cost_model="none"))
+                          BacktestConfig(quantity=1, stop_loss_pct=0.0, cost_model="none",
+                                         slippage_bps=0))
     assert result.n_trades == 2
     assert result.strike_rate == pytest.approx(50.0)
 
@@ -169,7 +170,8 @@ def test_strike_rate_is_nan_without_trades():
 
 def test_profit_matches_the_equity_curve():
     df = frame_from([10, 20, 30, 40])
-    cfg = BacktestConfig(quantity=2, stop_loss_pct=0.0, commission=0.0, cost_model="none")
+    cfg = BacktestConfig(quantity=2, stop_loss_pct=0.0, commission=0.0, cost_model="none",
+                         slippage_bps=0)
     result = run_backtest(df, ScriptedStrategy([LONG, FLAT, EXIT, FLAT]), cfg)
     assert result.final_equity - cfg.initial_cash == pytest.approx(result.profit)
 

@@ -268,12 +268,20 @@ def run_backtest(df: pd.DataFrame, strategy: Strategy, cfg: BacktestConfig | Non
             if position > 0:
                 stop = entry_price * (1 - cfg.stop_loss_pct)
                 if lows[i] <= stop:
-                    close_position(i, stop, "stop_loss")
+                    # A bar that opened below the stop gapped through it: there
+                    # was never a fill available at the stop level, so the
+                    # realistic exit is the open.
+                    fill = min(stop, opens[i]) if cfg.gap_through_stops else stop
+                    close_position(i, fill, "stop_loss")
             else:
                 stop = entry_price * (1 + cfg.stop_loss_pct)
                 if highs[i] >= stop:
-                    close_position(i, stop, "stop_loss")
+                    fill = max(stop, opens[i]) if cfg.gap_through_stops else stop
+                    close_position(i, fill, "stop_loss")
 
+        # Take-profits deliberately fill at the target even when the bar gaps
+        # past it: crediting favourable gaps while charging adverse ones would
+        # bias the test in the strategy's favour.
         if position != 0 and cfg.take_profit_pct:
             if position > 0:
                 target = entry_price * (1 + cfg.take_profit_pct)

@@ -202,10 +202,13 @@ def test_a_marginal_winner_becomes_a_loser_after_charges():
     df = frame_from([1000, 1000, 1001, 1001])      # +0.1%, under the ~0.34% breakeven
     signals = [LONG, FLAT, EXIT, FLAT]
 
+    # slippage pinned to 0: this test isolates the effect of charges alone.
     free = run_backtest(df, ScriptedStrategy(signals),
-                        BacktestConfig(quantity=10, stop_loss_pct=0.0, cost_model="none"))
+                        BacktestConfig(quantity=10, stop_loss_pct=0.0, cost_model="none",
+                                       slippage_bps=0))
     charged = run_backtest(df, ScriptedStrategy(signals),
-                           BacktestConfig(quantity=10, stop_loss_pct=0.0, cost_model="delivery"))
+                           BacktestConfig(quantity=10, stop_loss_pct=0.0, cost_model="delivery",
+                                          slippage_bps=0))
 
     assert free.strike_rate == pytest.approx(100.0)
     assert charged.strike_rate == pytest.approx(0.0)
@@ -245,3 +248,99 @@ def test_result_dict_exposes_cost_drag():
 def test_default_config_charges_costs():
     """Regression: the default must not silently report gross figures."""
     assert BacktestConfig().cost_model == "delivery"
+
+
+# ----------------------------------------------------------------------
+# slippage and gap-through stop fills
+# ----------------------------------------------------------------------
+def test_default_slippage_is_nonzero():
+    """Regression: frictionless fills flatter every strategy."""
+    assert BacktestConfig().slippage_bps > 0
+    assert BacktestConfig().gap_through_stops is True
+
+
+def test_slippage_moves_both_legs_against_the_trader():
+    df = frame_from([100, 100, 100, 100])
+    signals = [LONG, FLAT, EXIT, FLAT]
+    base = dict(quantity=10, stop_loss_pct=0.0, cost_model="none")
+
+    clean = run_backtest(df, ScriptedStrategy(signals), BacktestConfig(slippage_bps=0, **base))
+    slipped = run_backtest(df, ScriptedStrategy(signals), BacktestConfig(slippage_bps=50, **base))
+
+    assert slipped.trades[0].entry_price > clean.trades[0].entry_price   # pay up to buy
+    assert slipped.trades[0].exit_price < clean.trades[0].exit_price     # sell lower
+    assert slipped.gross_profit < clean.gross_profit
+
+
+def test_slippage_scales_with_the_rate():
+    df = frame_from([100, 100, 100, 100])
+    signals = [LONG, FLAT, EXIT, FLAT]
+    base = dict(quantity=10, stop_loss_pct=0.0, cost_model="none")
+
+    small = run_backtest(df, ScriptedStrategy(signals), BacktestConfig(slippage_bps=10, **base))
+    large = run_backtest(df, ScriptedStrategy(signals), BacktestConfig(slippage_bps=100, **base))
+    assert large.gross_profit < small.gross_profit
+
+
+def gap_frame():
+    """Bar 2 gaps far below the 10% stop: opens at 80, never trades near 90."""
+    idx = pd.bdate_range("2024-01-01", periods=3)
+    return pd.DataFrame(
+        {"Open": [100.0, 100.0, 80.0], "High": [100.0, 100.0, 82.0],
+         "Low": [100.0, 100.0, 78.0], "Close": [100.0, 100.0, 79.0], "Volume": 1_000},
+        index=idx,
+    )
+
+
+def test_gap_through_stop_fills_at_the_open_not_the_stop():
+    r = run_backtest(gap_frame(), ScriptedStrategy([LONG, FLAT, FLAT]),
+                     BacktestConfig(quantity=10, stop_loss_pct=0.10, cost_model="none",
+                                    slippage_bps=0, gap_through_stops=True))
+    trade = r.trades[0]
+    assert trade.exit_reason == "stop_loss"
+    assert trade.exit_price == pytest.approx(80.0)      # the gap open, not 90
+
+
+def test_gap_handling_can_be_disabled():
+    r = run_backtest(gap_frame(), ScriptedStrategy([LONG, FLAT, FLAT]),
+                     BacktestConfig(quantity=10, stop_loss_pct=0.10, cost_model="none",
+                                    slippage_bps=0, gap_through_stops=False))
+    assert r.trades[0].exit_price == pytest.approx(90.0)   # optimistic stop-level fill
+
+
+def test_gap_aware_stops_are_never_more_favourable():
+    df = load_synthetic("GAP", days=800)
+    strategy = build_strategy("multiple")
+    base = dict(quantity=10, stop_loss_pct=0.05, cost_model="delivery", slippage_bps=5)
+
+    optimistic = run_backtest(df, strategy, BacktestConfig(gap_through_stops=False, **base))
+    realistic = run_backtest(df, strategy, BacktestConfig(gap_through_stops=True, **base))
+    assert realistic.profit <= optimistic.profit
+
+
+def test_stop_inside_the_bar_still_fills_at_the_stop():
+    """No gap: the bar opens above the stop and trades down through it."""
+    idx = pd.bdate_range("2024-01-01", periods=3)
+    df = pd.DataFrame(
+        {"Open": [100.0, 100.0, 99.0], "High": [100.0, 100.0, 99.0],
+         "Low": [100.0, 100.0, 85.0], "Close": [100.0, 100.0, 88.0], "Volume": 1_000},
+        index=idx,
+    )
+    r = run_backtest(df, ScriptedStrategy([LONG, FLAT, FLAT]),
+                     BacktestConfig(quantity=10, stop_loss_pct=0.10, cost_model="none",
+                                    slippage_bps=0, gap_through_stops=True))
+    assert r.trades[0].exit_price == pytest.approx(90.0)
+
+
+def test_take_profit_is_not_credited_for_a_favourable_gap():
+    """Gapping past the target must not pay better than the target."""
+    idx = pd.bdate_range("2024-01-01", periods=3)
+    df = pd.DataFrame(
+        {"Open": [100.0, 100.0, 130.0], "High": [100.0, 100.0, 135.0],
+         "Low": [100.0, 100.0, 128.0], "Close": [100.0, 100.0, 132.0], "Volume": 1_000},
+        index=idx,
+    )
+    r = run_backtest(df, ScriptedStrategy([LONG, FLAT, FLAT]),
+                     BacktestConfig(quantity=10, stop_loss_pct=0.0, take_profit_pct=0.10,
+                                    cost_model="none", slippage_bps=0))
+    assert r.trades[0].exit_price == pytest.approx(110.0)   # the target, not 130

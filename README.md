@@ -145,8 +145,8 @@ split, measures memorisation. On the full 10 years that inflation is large:
 
 | Multiple Strategy + RF | Strike rate | Net profit | Trades |
 |---|---|---|---|
-| 10y window overlapping training | 60.6% | ₹16,253 | 109 |
-| Out-of-sample only | 18.8% | **−₹3,901** | 32 |
+| 10y window overlapping training | 58.7% | ₹15,170 | 109 |
+| Out-of-sample only | 18.8% | **−₹4,304** | 32 |
 
 `compare` and `paper-run --use-model` therefore trim to the model's out-of-sample period
 automatically; `--allow-in-sample` opts out and logs a warning.
@@ -158,13 +158,13 @@ automatically; `--allow-in-sample` opts out and logs a warning.
 
 | Strategy | Net profit | Net + RF | Δ | Trades → +RF |
 |---|---|---|---|---|
-| Moving Average Crossover | −₹1,113.69 | −₹1,028.29 | **+₹85.40** | 18 → 16 |
-| Donchian | ₹1,000.82 | ₹814.61 | −₹186.21 | 11 → 11 |
-| Multiple Strategy | −₹3,932.98 | −₹3,901.10 | **+₹31.88** | 33 → 32 |
-| Gold Cross | −₹1,403.70 | −₹1,403.70 | ₹0.00 | 2 → 2 |
+| Moving Average Crossover | −₹1,887.99 | −₹1,777.89 | **+₹110.10** | 18 → 16 |
+| Donchian | ₹860.49 | ₹674.19 | −₹186.30 | 11 → 11 |
+| Multiple Strategy | −₹4,859.67 | −₹4,304.40 | **+₹555.27** | 33 → 32 |
+| Gold Cross | −₹1,430.15 | −₹1,430.15 | ₹0.00 | 2 → 2 |
 
-**The model improved P&L in 2 of 4 strategies**, both by trivial amounts. On TCS and INFY it improved
-**3 of 4**:
+**The model improved P&L in 2 of 4 strategies**, and only by shrinking losses — every RELIANCE
+strategy bar Donchian loses money net. On TCS and INFY it improved **3 of 4**:
 
 | Symbol | Buy & hold (same window) | Strategies improved by RF |
 |---|---|---|
@@ -190,10 +190,10 @@ python -m algobot.cli validate --symbol TCS --trials 200
 Permutation test -- TCS: does the RF filter beat random vetoes of equal size?
 STRATEGY        VETOED      BASE P&L     MODEL P&L   RANDOM MEAN   PCTILE       p
 ---------------------------------------------------------------------------------
-ma                2/14   Rs 6,805.18   Rs 7,373.00   Rs 5,746.21    66.0%   0.340
-donchian         19/58  Rs -4,616.65  Rs -3,172.35  Rs -4,854.71    71.5%   0.285
-multiple       102/389 Rs -14,644.62 Rs -12,099.86 Rs -12,895.36    69.0%   0.310
-gold               0/1   Rs 4,127.62   Rs 4,127.62   Rs 4,127.62     0.0%   1.000
+ma                2/14   Rs 6,364.48   Rs 6,998.58   Rs 5,367.65    66.0%   0.340
+donchian         19/58  Rs -6,273.37  Rs -3,684.60  Rs -6,082.12    81.5%   0.185
+multiple       102/389 Rs -16,238.15 Rs -13,695.67 Rs -14,354.76    65.5%   0.345
+gold               0/1   Rs 4,090.75   Rs 4,090.75   Rs 4,090.75     0.0%   1.000
 ```
 
 Across all three symbols and four strategies — **12 tests — the model beat random vetoing at
@@ -206,7 +206,7 @@ design (no null model, no out-of-sample separation) could not have detected.
 
 Rerun any of this yourself — every number above comes from a command in this repo.
 
-### 5. Costs eat 41% of the profit
+### 5. Costs and slippage eat 54% of the profit
 
 The paper's tables are gross of everything ("reduced exchange costs"). On NSE
 equities the statutory charges are not a rounding error, and they are asymmetric: STT is 0.1% *per
@@ -216,17 +216,30 @@ side* on delivery, stamp duty falls on the buy, and a DP charge hits every deliv
 exchange transaction charges, SEBI turnover fees, stamp duty, GST, and DP charges — applied per leg.
 `--costs delivery` (the default), `intraday`, or `none` to reproduce the paper's gross figures.
 
-Across all 12 ten-year runs:
+Three frictions are modelled, and each was defaulted **on** because leaving any of them off
+flatters every strategy:
 
-| | Gross | Charges | Net |
-|---|---|---|---|
-| Total P&L | ₹64,285 | −₹26,271 | **₹38,014** |
-| Profitable runs | 12 / 12 | | **10 / 12** |
+| Friction | Default | What it corrects |
+|---|---|---|
+| Statutory charges + brokerage | `delivery` | The paper reports gross of everything |
+| Slippage | 5 bps per side | Filling at the open assumes a price you never had to compete for |
+| Gap-through stops | enabled | Filling a stop *at* the stop assumes a fill exists there — untrue on exactly the gap days that trigger stops |
 
-**Charges consume 41% of gross profit**, and turn two strategies from winners into losers —
-Multiple Strategy on RELIANCE goes from +₹714 to **−₹2,473**, and on TCS from +₹1,459 to
-**−₹4,409**. Both are the highest-turnover strategy in the set, which is the whole point: cost is a
-function of how often you trade.
+Across all 12 ten-year runs, frictionless → realistic:
+
+| | Frictionless | Realistic |
+|---|---|---|
+| Total P&L | ₹64,285 | **₹21,988** |
+| Charges | — | −₹26,264 |
+| Profitable runs | 12 / 12 | **9 / 12** |
+
+**The three frictions consume 54% of gross profit.** Charges alone turn two runs from winners into
+losers — Multiple Strategy on RELIANCE goes from +₹714 to **−₹2,473**, and on TCS from +₹1,459 to
+**−₹4,409**; both are the highest-turnover strategy in the set, which is the point: cost scales with
+how often you trade, not how well.
+
+Gap-aware stops cost a further ₹635–₹1,496 per run on the strategies that stop out often, and flip
+INFY / Multiple Strategy from +₹219 to **−₹1,277** on their own.
 
 The single most useful number the model produces is the **breakeven move** — how far price must
 travel just to pay for the round trip:
@@ -252,10 +265,10 @@ costs**, the direct analogue of the paper's Tables 3–6:
 
 | Strategy | RELIANCE 10y | TCS 10y | INFY 10y |
 |---|---|---|---|
-| Moving Average Crossover | 28.57% / ₹2,998 | 47.73% / **₹19,759** | 39.13% / ₹2,086 |
-| Donchian | 43.24% / ₹4,179 | 50.00% / ₹2,971 | 36.36% / ₹1,400 |
-| Multiple Strategy | 26.97% / −₹2,473 | 38.96% / −₹4,409 | 36.71% / ₹1,185 |
-| Gold Cross | 57.14% / ₹6,243 | 33.33% / ₹131 | 28.57% / ₹3,944 |
+| Moving Average Crossover | 28.57% / ₹1,802 | 45.45% / **₹17,632** | 39.13% / ₹1,630 |
+| Donchian | 43.24% / ₹3,874 | 50.00% / ₹815 | 36.36% / ₹754 |
+| Multiple Strategy | 26.97% / −₹4,073 | 34.62% / −₹7,004 | 35.44% / −₹1,277 |
+| Gold Cross | 42.86% / ₹3,969 | 33.33% / ₹27 | 28.57% / ₹3,837 |
 | *Buy & hold* | *₹10,819* | *₹10,237* | *₹6,223* |
 
 Only **1 of 12** net results beats buying and holding (TCS / MA Crossover). Gold Cross returns **NA** on every 1-year window, exactly as the paper
@@ -274,22 +287,22 @@ Pooled across all 527 closed trades in the twelve 10-year runs:
 
 | Metric | Value |
 |---|---|
-| **Win rate** | **37.38%** (197 wins / 330 losses) |
-| **Net P&L** | **₹38,014** (gross ₹64,285 − ₹26,271 charges) |
-| Average trade | **+₹72.13** |
-| Average win | +₹1,146.28 |
-| Average loss | −₹569.10 |
-| Payoff ratio | 2.01 : 1 |
-| Profit factor | **1.20** |
-| Average cost per trade | ₹49.85 |
-| Mean 10y return on a ₹100,000 account | ~5.4% gross, **~3.2% net** |
+| **Win rate** | **36.43%** (192 wins / 335 losses) |
+| **Net P&L** | **₹21,988** (gross ₹48,252 − ₹26,264 charges) |
+| Average trade | **+₹41.72** |
+| Average win | +₹1,150.08 |
+| Average loss | −₹593.52 |
+| Payoff ratio | 1.94 : 1 |
+| Profit factor | **1.11** |
+| Average cost per trade | ₹49.84 |
+| Mean 10y return on a ₹100,000 account | **~1.8%** — under 0.2%/year |
 
-A sub-50% win rate is normal for trend-following — the 2.01:1 payoff is what makes 37% profitable.
-But the margin is thin: a profit factor of 1.20 means ₹1.20 earned per ₹1.00 lost, and the average
-trade clears its own ₹49.85 of charges by only ₹72. Slippage is still set to zero in all of the
-above; a realistic fill assumption would erode much of what remains.
+A sub-50% win rate is normal for trend-following: the 1.94:1 payoff is what makes 36% profitable at
+all. But the margin is now very thin. A profit factor of **1.11** means ₹1.11 earned per ₹1.00 lost,
+and the average trade clears its own ₹49.84 of charges by only ₹42 — costs are larger than the edge
+they are levied on.
 
-Read alongside the fact that only 1 of 12 runs beats buy and hold, this is a working research
+Read alongside the fact that only **1 of 12** runs beats buy and hold, this is a working research
 implementation, not a deployable edge.
 
 ---
@@ -372,7 +385,7 @@ If the market closes while a position is still open, the bot logs it as an **err
 python -m pytest tests/ -q
 ```
 
-195 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
+203 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
 regime shift, look-ahead leakage in every strategy, execution timing, stop-loss and slippage
 mechanics, strike-rate/profit maths, model persistence, the DhanHQ v2 order-body contract, the
 live-order guard, all three bot stop conditions, and the CLI.
@@ -399,7 +412,7 @@ algobot/
   backtest/            execution engine, costs, Tables 3-6 reporting, permutation test
   broker/              base interface, DhanHQ v2 client, simulated + replay brokers
   bot/                 live trading loop and risk guards
-tests/                 195 tests
+tests/                 203 tests
 artifacts/             generated charts, tables, journals  (git-ignored)
 models/                joblib bundles                      (git-ignored)
 cache/                 downloaded bars, scrip master, paper ledger (git-ignored)
