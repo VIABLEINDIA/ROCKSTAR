@@ -1,0 +1,48 @@
+# Copy to config.yaml and pass with: algobot -c config.yaml <command>
+# Every key is optional; anything omitted keeps the default in algobot/config.py.
+
+data:
+  symbol: RELIANCE          # NSE trading symbol
+  exchange_segment: NSE_EQ
+  instrument: EQUITY
+  period: 10y
+  interval: 1d
+  source: dhan              # dhan | yahoo | synthetic
+  yahoo_suffix: .NS
+  use_cache: true
+
+preprocess:
+  n_lags: 41                # Section IV.A
+  n_input_lags: 33          # the paper's [0:33] split point
+  train_ratio: 0.60         # Section IV.B, 60:40
+  normalize: true           # false reproduces the paper's raw-price behaviour
+
+model:
+  n_estimators: 300
+  max_depth: null
+  min_samples_leaf: 1
+  random_state: 42
+  n_jobs: -1
+
+backtest:
+  quantity: 10              # shares per trade
+  initial_cash: 100000.0
+  currency: INR
+  commission: 0.0
+  slippage_bps: 0.0
+  stop_loss_pct: 0.05
+  take_profit_pct: null
+  allow_short: false
+
+bot:
+  symbol: RELIANCE
+  exchange_segment: NSE_EQ
+  product_type: INTRADAY    # INTRADAY | CNC | MARGIN
+  strategy: ma
+  quantity: 10
+  poll_seconds: 60
+  day_stop_loss_pct: 0.02   # halt the session after -2%
+  trade_stop_loss_pct: 0.02
+  max_trades_per_day: 20
+  use_model: true
+  broker: sim               # sim | dhan
