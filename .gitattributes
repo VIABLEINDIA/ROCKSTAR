@@ -1,0 +1,41 @@
+# Normalise line endings across platforms.
+# Everything Git detects as text is stored with LF in the repository and
+# checked out with LF, so Windows, macOS and Linux checkouts stay identical
+# and diffs never show whole-file line-ending churn.
+* text=auto eol=lf
+
+# Explicit text types (belt and braces for the files this project ships).
+*.py      text eol=lf
+*.md      text eol=lf
+*.txt     text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.json    text eol=lf
+*.csv     text eol=lf
+*.cfg     text eol=lf
+*.toml    text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+.env.example    text eol=lf
+
+# Windows-only scripts must keep CRLF or they break when run natively.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary artifacts: never touch these, and never try to diff them.
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.pdf     binary
+*.joblib  binary
+*.pkl     binary
+*.parquet binary
+*.zip     binary
+*.gz      binary
+*.ico     binary
+
+# Generated outputs are git-ignored, but if one is ever force-added, keep it
+# out of diffs and language statistics.
+artifacts/** linguist-generated=true
