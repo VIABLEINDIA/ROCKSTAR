@@ -15,6 +15,25 @@ Alpaca/US setup, so prices, orders and P&L are in ₹ on Indian equities.
 
 ---
 
+## What the results actually say
+
+The paper's method is implemented in full, and then tested honestly. Most of it does not survive
+that test; one part of it does, and not the part the paper emphasises.
+
+| Claim | Verdict |
+|---|---|
+| Random Forest predicts price movement | **No.** R² ≈ 0 and ~50% directional accuracy at every horizon tested |
+| Fusing the model with a strategy improves it | **No.** Beats a random filter of equal strength in 1 of 12 tests — chance |
+| The strategies are profitable | **Only on some instruments, and only net of the right benchmark** |
+| Higher win rate is the goal | **No.** Tuning to a 70.9% win rate *lost* ₹37,517; the profit objective won at 28% |
+| Intraday trading helps | **No.** Worse than daily on every measure |
+| Trend-following protects against collapse | **Yes — the one result that holds.** 41 of 44 runs on failed companies beat buying and holding |
+
+The strategies' demonstrated value is **not losing 95% when a company fails**, not out-earning a
+rising market. Full workings in [Findings](#findings-where-this-reproduces-the-paper-and-where-it-doesnt).
+
+---
+
 ## Quick start
 
 ```bash
@@ -390,7 +409,10 @@ alongside the successes.
    disasters; they do not out-earn a rising market.
 4. Win rate falls to 24.94%. Still no relationship between win rate and profitability.
 
-### Strategy results across three symbols
+### Reference tables: the paper's own setup, three large-caps
+
+For direct comparison with the paper. This is the *narrow* configuration — three large-cap symbols,
+a fixed 10 shares per trade — and section 8 above supersedes it as the project's actual result.
 
 `paper-run` output (10 shares/trade, 5% stop, strategies only — no model), **net of delivery
 costs**, the direct analogue of the paper's Tables 3–6:
@@ -413,9 +435,9 @@ negative on both durations, so a mixed outcome here is consistent with it. Strik
 are not by themselves damning — a trend-following strategy is designed to lose small and win big —
 but the profit column is what the comparison turns on.
 
-### Overall performance, net of costs
+### Overall performance on the large-cap set, net of costs
 
-Pooled across all 527 closed trades in the twelve 10-year runs:
+Pooled across all 527 closed trades in the twelve large-cap 10-year runs:
 
 | Metric | Value |
 |---|---|
@@ -434,8 +456,10 @@ all. But the margin is now very thin. A profit factor of **1.11** means ₹1.11 
 and the average trade clears its own ₹49.84 of charges by only ₹42 — costs are larger than the edge
 they are levied on.
 
-Read alongside the fact that only **1 of 12** runs beats buy and hold, this is a working research
-implementation, not a deployable edge.
+Read alongside the fact that only **1 of 12** runs beats buy and hold, **the paper's own
+configuration is not a deployable edge.** That verdict is specific to this setup: three large-caps,
+fixed share sizing, no survivorship correction. Widening the universe to a point-in-time mid-cap
+set (section 8) is what changes the answer.
 
 ---
 
@@ -549,6 +573,34 @@ artifacts/             generated charts, tables, journals  (git-ignored)
 models/                joblib bundles                      (git-ignored)
 cache/                 downloaded bars, scrip master, paper ledger (git-ignored)
 ```
+
+---
+
+## Conclusion
+
+The paper reports that a Random Forest over lagged closing prices, fused with classical strategies,
+produces profitable automated trading. Reimplemented on NSE data and tested out-of-sample, the model
+contributes nothing: R² ≈ 0, ~50% directional accuracy, and a filtering benefit indistinguishable
+from vetoing trades at random. The strategies carry whatever performance exists, and the paper's
+own configuration — three large-caps, fixed share sizing, gross of costs — does not beat buying and
+holding.
+
+What survived every correction was something the paper does not claim. On a point-in-time mid-cap
+universe that keeps its failures, the strategies beat buy & hold on **77 of 140 runs**, and on the
+companies that actually collapsed they beat it on **41 of 44**, turning −₹3.41M of buy-and-hold
+losses into +₹1.26M. Trend-following did not predict anything; it exited and stayed out. Gitanjali
+Gems marks the limit — a fraud that gapped rather than trended, where the strategies lost *more*
+than holding.
+
+Each methodological correction along the way — window normalisation, out-of-sample separation,
+realistic costs, slippage, gap-through stops, notional sizing, survivorship — moved the numbers, and
+several reversed a conclusion outright. That is the argument for building the checks before the
+results, which is what most of this repository is.
+
+**Anyone extending this should start with the known gaps:** 4 of 15 casualties have no data on
+either exchange, delisted series are marked out at last traded price on both sides of the
+comparison, and the mid-cap universe is hand-assembled rather than reconstructed from historical
+index membership.
 
 ---
 
