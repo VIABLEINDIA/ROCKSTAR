@@ -218,8 +218,12 @@ def load_prices(cfg: DataConfig, creds: DhanCredentials | None = None) -> pd.Dat
         log.info("Loading cached bars from %s", cache)
         df = pd.read_csv(cache, index_col="Date", parse_dates=["Date"])
         if not df.empty:
-            return _normalise(df)
+            out = _normalise(df)
+            out.attrs["source"] = f"cache:{cfg.source}"
+            out.attrs["symbol"] = cfg.symbol
+            return out
 
+    used = cfg.source
     try:
         if cfg.source == "dhan":
             df = _load_dhan(cfg, creds)
@@ -232,11 +236,26 @@ def load_prices(cfg: DataConfig, creds: DhanCredentials | None = None) -> pd.Dat
     except Exception as exc:  # network, auth, rate limit, unknown symbol...
         log.warning("Download from %s failed (%s); trying the next source", cfg.source, exc)
         try:
-            df = _load_yahoo(cfg) if cfg.source != "yahoo" else _load_synthetic_for(cfg)
+            if cfg.source != "yahoo":
+                df = _load_yahoo(cfg)
+                used = "yahoo"
+            else:
+                raise
         except Exception as exc2:
-            log.warning("Fallback source failed too (%s); using synthetic bars", exc2)
+            if not cfg.allow_synthetic_fallback:
+                raise RuntimeError(
+                    f"No real market data for {cfg.symbol!r} "
+                    f"({cfg.source} failed: {exc}; yahoo failed: {exc2}). "
+                    "Synthetic fallback is disabled, so this is not being substituted "
+                    "with generated bars."
+                ) from exc2
+            log.warning("Fallback source failed too (%s); FABRICATING synthetic bars for %s "
+                        "-- these are not market data", exc2, cfg.symbol)
             df = _load_synthetic_for(cfg)
+            used = "synthetic"
 
+    df.attrs["source"] = used          # provenance: what actually produced these bars
+    df.attrs["symbol"] = cfg.symbol
     if cfg.use_cache:
         df.to_csv(cache)
     return df

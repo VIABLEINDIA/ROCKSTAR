@@ -33,6 +33,15 @@ class DataConfig:
     yahoo_suffix: str = ".NS"    # NSE tickers on Yahoo Finance
     use_cache: bool = True
 
+    allow_synthetic_fallback: bool = True
+    """Substitute generated bars when no real source can be reached.
+
+    Keeps demos, tests and CI runnable offline. It must be turned OFF for any
+    analysis: a delisted or renamed ticker would otherwise be silently
+    replaced by fabricated data and reported as a result. Research code should
+    pass False and let the failure surface.
+    """
+
 
 @dataclass
 class PreprocessConfig:

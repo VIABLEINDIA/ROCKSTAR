@@ -174,10 +174,12 @@ def test_late_entry_signal_is_suppressed(broker, tmp_path, monkeypatch):
     assert broker.get_position(SYMBOL) is None
 
 
-def test_market_close_while_holding_is_logged(broker, tmp_path):
+def test_market_close_while_holding_is_logged(broker, tmp_path, monkeypatch):
     bot = make_bot(broker, tmp_path, product_type="INTRADAY")
     broker.buy(SYMBOL, 10)
-    broker.force_market_open = False
+    # Pinned rather than relying on the wall clock: this test passed at night
+    # and failed during NSE hours.
+    monkeypatch.setattr(broker, "is_market_open", lambda: False)
 
     assert bot.step() == "market_closed"
     assert any("auto-square-off" in e.message for e in bot.events if e.kind == "error")

@@ -190,12 +190,14 @@ def test_bot_flattens_an_open_position_when_stopped(broker, tmp_path):
     assert broker.get_position(SYMBOL) is None
 
 
-def test_bot_stops_when_the_market_is_closed(broker, tmp_path):
-    broker.force_market_open = False
+def test_bot_stops_when_the_market_is_closed(broker, tmp_path, monkeypatch):
     bot = make_bot(broker, tmp_path)
-    if not broker.is_market_open():                 # depends on wall-clock time
-        assert bot.step() == "market_closed"
-        assert bot.risk.halt_reason == "market closed"
+    # Pinned rather than read from the wall clock, which made this a no-op
+    # during NSE hours and an assertion outside them.
+    monkeypatch.setattr(broker, "is_market_open", lambda: False)
+
+    assert bot.step() == "market_closed"
+    assert bot.risk.halt_reason == "market closed"
 
 
 def test_bot_halts_on_the_day_stop_loss(broker, tmp_path):
