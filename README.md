@@ -92,7 +92,7 @@ Run `python -m algobot.cli <command> --help` for the full flag list.
 
 ## Findings: where this reproduces the paper, and where it doesn't
 
-Seven things in the paper's method do not survive contact with out-of-sample NSE data. Each is
+Eight findings from the paper's method do not survive contact with out-of-sample NSE data. Each is
 implemented as described *and* addressed, with the fix documented and switchable.
 
 ### 1. Training on raw price levels cannot generalise
@@ -316,6 +316,47 @@ Intraday grids are expressed in bars, not days ([`optimize.py`](algobot/backtest
 200-bar slow average on hourly data is a 29-session average, which is not an intraday strategy at
 all.
 
+### 8. Mid-caps: the first result that works
+
+Every finding above is negative, so this one deserves its own scrutiny.
+
+Screening 25 NSE mid-caps against the cost breakeven showed the constraint is only partly
+volatility — it is mostly **share price**, because a flat ₹12.5 DP charge is 0.3% of a 10-share
+position in a ₹400 stock and 0.008% of one in a ₹15,000 stock. YESBANK has 61.8% annualised
+volatility and a **6.7% breakeven**; DIXON has 39.8% volatility and a **0.23% breakeven**.
+
+That is an artefact of fixed-share sizing, not of the market, so `position_notional` sizes each
+trade to a rupee amount instead. At ₹1,00,000 per trade, cost drag is ~₹237 regardless of price.
+
+**Default parameters — no tuning at all** — over 10 years, ₹1,00,000 per trade:
+
+| | Runs | Trades | Win rate | Net P&L | Median/run | Profitable | Beat B&H |
+|---|---|---|---|---|---|---|---|
+| Large-cap (3 symbols) | 12 | 527 | 36.83% | ₹602,858 | ₹49,145 | 11/12 | **0/12** |
+| Mid-cap (25 symbols) | 100 | 3,677 | 27.66% | **₹12,372,001** | ₹67,084 | 69/100 | **28/100** |
+
+The headline is not the P&L — mid-caps simply moved more — but that **28 of 100 mid-cap runs beat
+buying and holding, against 0 of 12 for large-caps.** That is the first evidence in this whole
+exercise of the strategies adding something rather than merely diluting beta.
+
+Note the win rate *fell* to 27.66% while profitability rose sharply. Same trade-off as everywhere
+else: on volatile names the wins are rarer and much larger.
+
+By strategy, Moving Average Crossover is clearly the best of the four on this universe
+(median ₹134,378, profitable on 21/25 symbols, beats buy & hold on 9/25); Gold Cross is the worst
+(median −₹11,170).
+
+**Caveats that matter before anyone acts on this:**
+
+1. **Survivorship bias.** All 25 are currently-listed NSE names. Companies that delisted or
+   collapsed entirely are absent, and they are exactly the cases where a trend-following stop
+   would be tested hardest. The universe should be reconstructed as-of 2016 to settle this.
+2. Excluding the three famous multi-baggers (MAZDOCK, RVNL, DIXON) the result survives but shrinks:
+   88 runs, ₹7.44M, 58/88 profitable, median ₹58,737.
+3. The tails are wide in both directions — best run ₹1,452,325, worst −₹120,868 — and on the
+   genuine losers the strategies *amplified* the loss: YESBANK −₹186,751 against buy & hold's
+   −₹91,482.
+
 ### Strategy results across three symbols
 
 `paper-run` output (10 shares/trade, 5% stop, strategies only — no model), **net of delivery
@@ -443,7 +484,7 @@ If the market closes while a position is still open, the bot logs it as an **err
 python -m pytest tests/ -q
 ```
 
-236 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
+242 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
 regime shift, look-ahead leakage in every strategy, execution timing, stop-loss and slippage
 mechanics, strike-rate/profit maths, model persistence, the DhanHQ v2 order-body contract, the
 live-order guard, all three bot stop conditions, and the CLI.
@@ -470,7 +511,7 @@ algobot/
   backtest/            execution engine, costs, Tables 3-6 reporting, permutation test
   broker/              base interface, DhanHQ v2 client, simulated + replay brokers
   bot/                 live trading loop and risk guards
-tests/                 236 tests
+tests/                 242 tests
 artifacts/             generated charts, tables, journals  (git-ignored)
 models/                joblib bundles                      (git-ignored)
 cache/                 downloaded bars, scrip master, paper ledger (git-ignored)

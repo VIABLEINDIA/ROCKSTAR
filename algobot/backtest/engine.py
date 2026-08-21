@@ -150,7 +150,9 @@ class BacktestResult:
             return 0.0
         first = self.history["close"].iloc[0]
         last = self.history["close"].iloc[-1]
-        return float((last - first) * self.config.quantity)
+        qty = (max(1, int(self.config.position_notional // first))
+               if self.config.position_notional and first > 0 else self.config.quantity)
+        return float((last - first) * qty)
 
     @property
     def sharpe(self) -> float:
@@ -259,11 +261,16 @@ def run_backtest(df: pd.DataFrame, strategy: Strategy, cfg: BacktestConfig | Non
         position, entry_price, entry_date = 0, 0.0, None
         entry_charges = ChargeBreakdown()
 
+    def position_size(fill: float) -> int:
+        if cfg.position_notional and fill > 0:
+            return max(1, int(cfg.position_notional // fill))
+        return cfg.quantity
+
     def open_position(i: int, price: float, direction: int) -> None:
         nonlocal cash, position, entry_price, entry_date, entry_charges
         entry_side = "buy" if direction > 0 else "sell"
         fill = _fill_price(price, entry_side, cfg.slippage_bps)
-        qty = cfg.quantity * direction
+        qty = position_size(fill) * direction
 
         entry_charges = costs.charges(fill, abs(qty), entry_side.upper())
         cash -= qty * fill + entry_charges.total + cfg.commission

@@ -67,7 +67,16 @@ class ModelConfig:
 
 @dataclass
 class BacktestConfig:
-    quantity: int = 10           # shares per trade
+    quantity: int = 10           # shares per trade (ignored when position_notional is set)
+
+    position_notional: float | None = None
+    """Rupees to commit per trade, sized to the price at entry.
+
+    A fixed share count makes cost drag depend on the share price rather than
+    on the strategy: the flat DP charge is 0.3% of a 10-share position in a
+    Rs 400 stock and 0.008% of one in a Rs 15,000 stock. Sizing by notional
+    removes that artefact, which matters as soon as symbols are compared.
+    """
     initial_cash: float = 100_000.0
     currency: str = "INR"
     cost_model: str = "delivery"

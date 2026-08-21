@@ -398,3 +398,67 @@ def test_square_off_never_carries_a_position_overnight():
                                     slippage_bps=0, intraday_square_off=True))
     for trade in r.trades:
         assert trade.entry_date.date() == trade.exit_date.date()
+
+
+# ----------------------------------------------------------------------
+# notional position sizing
+# ----------------------------------------------------------------------
+def test_notional_sizing_scales_share_count_to_price():
+    cheap = frame_from([100, 100, 110, 110])
+    dear = frame_from([1000, 1000, 1100, 1100])
+    signals = [LONG, FLAT, EXIT, FLAT]
+    cfg = BacktestConfig(position_notional=100_000, stop_loss_pct=0.0,
+                         cost_model="none", slippage_bps=0)
+
+    a = run_backtest(cheap, ScriptedStrategy(signals), cfg)
+    b = run_backtest(dear, ScriptedStrategy(signals), cfg)
+    assert a.trades[0].quantity == 1000
+    assert b.trades[0].quantity == 100
+
+
+def test_notional_sizing_equalises_cost_drag_across_price_levels():
+    """The flat DP charge otherwise makes cheap stocks look far more expensive."""
+    signals = [LONG, FLAT, EXIT, FLAT]
+    cfg = BacktestConfig(position_notional=100_000, stop_loss_pct=0.0,
+                         cost_model="delivery", slippage_bps=0)
+
+    cheap = run_backtest(frame_from([50, 50, 55, 55]), ScriptedStrategy(signals), cfg)
+    dear = run_backtest(frame_from([5000, 5000, 5500, 5500]), ScriptedStrategy(signals), cfg)
+
+    ratio = cheap.total_costs / dear.total_costs
+    assert 0.9 < ratio < 1.1, f"cost drag still price-dependent: {ratio:.2f}"
+
+
+def test_fixed_share_sizing_does_not_equalise_cost_drag():
+    """Contrast: the same comparison at a fixed 10 shares is wildly skewed."""
+    signals = [LONG, FLAT, EXIT, FLAT]
+    cfg = BacktestConfig(quantity=10, stop_loss_pct=0.0, cost_model="delivery",
+                         slippage_bps=0)
+
+    cheap = run_backtest(frame_from([50, 50, 55, 55]), ScriptedStrategy(signals), cfg)
+    dear = run_backtest(frame_from([5000, 5000, 5500, 5500]), ScriptedStrategy(signals), cfg)
+    assert cheap.total_costs / dear.total_costs < 0.5
+
+
+def test_notional_never_sizes_to_zero_shares():
+    """A price above the notional must still take one share, not none."""
+    cfg = BacktestConfig(position_notional=1_000, stop_loss_pct=0.0,
+                         cost_model="none", slippage_bps=0)
+    r = run_backtest(frame_from([9000, 9000, 9500, 9500]),
+                     ScriptedStrategy([LONG, FLAT, EXIT, FLAT]), cfg)
+    assert r.trades[0].quantity == 1
+
+
+def test_quantity_is_used_when_no_notional_is_set():
+    cfg = BacktestConfig(quantity=7, stop_loss_pct=0.0, cost_model="none", slippage_bps=0)
+    r = run_backtest(frame_from([100, 100, 110, 110]),
+                     ScriptedStrategy([LONG, FLAT, EXIT, FLAT]), cfg)
+    assert r.trades[0].quantity == 7
+
+
+def test_buy_and_hold_benchmark_respects_notional_sizing():
+    cfg = BacktestConfig(position_notional=100_000, stop_loss_pct=0.0,
+                         cost_model="none", slippage_bps=0)
+    df = frame_from([100, 100, 110, 110])
+    r = run_backtest(df, ScriptedStrategy([LONG, FLAT, EXIT, FLAT]), cfg)
+    assert r.buy_and_hold_profit == pytest.approx(1000 * 10)
