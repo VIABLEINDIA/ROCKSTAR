@@ -59,6 +59,27 @@ CASUALTIES_2016 = [
     "SINTEX",        # Sintex Industries -- insolvency
 ]
 
+# Yahoo drops NSE history for fully delisted companies but often keeps the BSE
+# listing, sometimes only under the numeric scrip code. Without these the worst
+# failures vanish from the universe -- which is the bias this module exists to
+# remove, so the fallbacks are part of the construction, not a convenience.
+BSE_FALLBACK = {
+    "DHFL": "511072.BO",          # Dewan Housing, last traded 2021-09
+    "VIDEOIND": "VIDEOIND.BO",    # Videocon Industries
+    "GITANJALI": "GITANJALI.BO",  # Gitanjali Gems
+    "COXANDKINGS": "533144.BO",   # Cox & Kings, last traded 2023-05
+    "TALWALKARS": "TALWALKARS.BO",
+    "BHUSANSTL": "500055.BO",     # Bhushan Steel, absorbed by Tata 2021
+    "EDUCOMP": "EDUCOMP.BO",
+    "UNITECH": "UNITECH.BO",
+    "PUNJLLOYD": "PUNJLLOYD.BO",
+    "SINTEX": "502742.BO",
+}
+
+# No data anywhere, on either exchange. Recorded so the residual gap in the
+# universe stays visible instead of being silently absent.
+NO_DATA_ANYWHERE = ["PUNJLLOYD", "SINTEX", "UNITECH"]
+
 LARGE_CAPS = ["RELIANCE", "TCS", "INFY"]
 
 
@@ -109,11 +130,22 @@ def load_universe(symbols: list[str], period: str = "10y", min_bars: int = 250,
     loaded, missing, frames = [], [], {}
 
     for symbol in symbols:
-        try:
-            df = load_prices(DataConfig(symbol=symbol, period=period, source="yahoo",
-                                        allow_synthetic_fallback=not strict))
-        except Exception as exc:
-            log.info("%s unavailable: %s", symbol, str(exc)[:100])
+        df = None
+        # NSE first, then the BSE listing if the company was delisted from NSE.
+        for ticker in (symbol, BSE_FALLBACK.get(symbol)):
+            if ticker is None:
+                continue
+            try:
+                df = load_prices(DataConfig(symbol=ticker, period=period, source="yahoo",
+                                            allow_synthetic_fallback=not strict))
+                if ticker != symbol:
+                    log.info("%s sourced from BSE as %s", symbol, ticker)
+                break
+            except Exception as exc:
+                log.info("%s unavailable as %s: %s", symbol, ticker, str(exc)[:80])
+                df = None
+
+        if df is None:
             missing.append(symbol)
             continue
 

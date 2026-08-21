@@ -342,34 +342,53 @@ casualties, because those companies *became* penny stocks by collapsing. Filteri
 whole-period median uses information the trader could not have had — the same error as survivorship
 bias itself. The floor is applied to the **price at the start of the window** instead.
 
+**d. Delisted names survive on BSE.** Yahoo drops NSE history for fully delisted companies but
+often keeps the BSE listing, sometimes only under the numeric scrip code (DHFL as `511072.BO`,
+Cox & Kings as `533144.BO`). Adding that fallback lifted casualty coverage from 33% to **73%**.
+A cache bug was hiding them further: a 1-row NSE stub for a delisted ticker was being cached and
+short-circuiting the fallback, so three casualties vanished silently. Frames below 20 rows are now
+treated as failed downloads and never cached.
+
 Default parameters, no tuning, 10 years, ₹1,00,000 per trade, ₹20 entry-price floor:
 
 | Group | Runs | Trades | Win rate | Net P&L | Buy & hold | Beat B&H |
 |---|---|---|---|---|---|---|
 | Large-cap | 12 | 527 | 36.81% | ₹602,858 | ₹2,676,780 | **0/12** |
-| Mid-cap survivors *(biased)* | 96 | 4,014 | 26.46% | ₹13,120,522 | ₹44,595,437 | 36/96 |
-| Mid-cap casualties | 20 | 766 | 19.58% | ₹154,865 | **−₹1,896,403** | **19/20** |
-| **Mid-cap, honest universe** | **116** | **4,780** | **25.36%** | **₹13,275,387** | ₹42,699,034 | **55/116** |
+| Mid-cap survivors *(biased)* | 96 | 4,014 | 26.46% | ₹13,120,522 | ₹44,595,437 | 36/96 (38%) |
+| Mid-cap casualties | 44 | 1,286 | 20.22% | ₹1,257,695 | **−₹3,412,683** | **41/44** |
+| **Mid-cap, honest universe** | **140** | **5,300** | **24.94%** | **₹14,378,217** | ₹41,182,755 | **77/140 (55%)** |
 
-**Correcting survivorship bias made the strategies look better, not worse** — the beat-rate against
-buy & hold rises from 36/96 (38%) to 55/116 (47%). The mechanism is the one trend-following exists
-for: it exits a collapsing stock and stays out, while buy & hold rides it down. Across the
-casualties it turned **−₹1.9M of buy-and-hold losses into +₹155K**, and beat holding on 19 of 20
-runs — RCOM +₹22,089 against −₹98,386, Jet Airways +₹151,579 against −₹93,218.
+**Every step of correcting the bias made the strategies look better**, which is the opposite of what
+survivorship correction normally does:
 
-That is the strongest finding in this repository, and it is the opposite of what I expected when
-correcting the bias.
+| Universe | Beat buy & hold |
+|---|---|
+| Survivors only | 36/96 — 38% |
+| + casualties available on NSE | 55/116 — 47% |
+| + casualties recovered from BSE | **77/140 — 55%** |
+
+The mechanism is the one trend-following exists for: it exits a collapsing stock and stays out,
+while buy & hold rides it to zero. Across the casualties it turned **−₹3.4M of buy-and-hold losses
+into +₹1.26M**, beating buy & hold on 41 of 44 runs — VIDEOIND +₹530,863 against −₹92,930,
+Cox & Kings +₹168,432 against −₹98,912, RCOM +₹22,089 against −₹98,386.
+
+**The one case where it failed is the instructive one.** Gitanjali Gems lost **−₹120,472 against
+buy & hold's −₹97,731** — worse than holding. Gitanjali was the Nirav Modi fraud: the collapse was
+a sequence of gaps, not a trend, so every stop filled below its level and repeated re-entries were
+knifed. That is precisely the failure mode a trend filter cannot cover, and it belongs in the record
+alongside the successes.
 
 **What is still wrong with it:**
 
-1. **10 of 15 casualties have no data at all** (33% coverage) — fully delisted names are gone from
-   Yahoo entirely. Those are the most extreme failures, and it is genuinely unclear which way they
-   cut: a trend exit would dodge most of the decline, but a suspension gaps through every stop.
-2. Mid-cap absolute P&L still trails buy & hold (₹13.3M against ₹42.7M) — these strategies reduce
-   drawdown and dodge disasters, they do not out-earn a rising market.
-3. Casualty median P&L is ₹1,047: roughly break-even in absolute terms. The value is in the loss
-   avoided, not in profit earned.
-4. Win rate falls to 25.36%. Still no relationship between win rate and profitability.
+1. **4 of 15 casualties have no data on either exchange** (UNITECH, PUNJLLOYD, EDUCOMP, SINTEX;
+   EDUCOMP was also below the price floor). The gap is recorded in `NO_DATA_ANYWHERE` rather than
+   left invisible.
+2. Delisted series simply stop, and both the strategy and the benchmark are marked out at the last
+   traded price. In reality a suspended holding recovers close to nothing, so **both** sides of the
+   casualty comparison are optimistic — the relative ranking holds, the absolute figures do not.
+3. Mid-cap absolute P&L still trails buy & hold (₹14.4M against ₹41.2M). These strategies avoid
+   disasters; they do not out-earn a rising market.
+4. Win rate falls to 24.94%. Still no relationship between win rate and profitability.
 
 ### Strategy results across three symbols
 
@@ -498,7 +517,7 @@ If the market closes while a position is still open, the bot logs it as an **err
 python -m pytest tests/ -q
 ```
 
-254 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
+259 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
 regime shift, look-ahead leakage in every strategy, execution timing, stop-loss and slippage
 mechanics, strike-rate/profit maths, model persistence, the DhanHQ v2 order-body contract, the
 live-order guard, all three bot stop conditions, and the CLI.
@@ -525,7 +544,7 @@ algobot/
   backtest/            execution engine, costs, Tables 3-6 reporting, permutation test
   broker/              base interface, DhanHQ v2 client, simulated + replay brokers
   bot/                 live trading loop and risk guards
-tests/                 254 tests
+tests/                 259 tests
 artifacts/             generated charts, tables, journals  (git-ignored)
 models/                joblib bundles                      (git-ignored)
 cache/                 downloaded bars, scrip master, paper ledger (git-ignored)

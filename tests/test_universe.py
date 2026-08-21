@@ -131,3 +131,88 @@ def test_price_floor_uses_the_start_price_not_the_median(monkeypatch):
     result = load_universe(["COLLAPSED"], min_price=20)
 
     assert result.loaded == ["COLLAPSED"], "a collapsed stock must stay in the universe"
+
+
+def test_bse_fallback_is_tried_when_nse_is_delisted(monkeypatch):
+    """Yahoo drops NSE history for delisted names but keeps the BSE listing."""
+    from algobot.data.loader import load_synthetic
+    from algobot.data.universe import BSE_FALLBACK
+
+    tried = []
+
+    def fake(cfg, *a, **k):
+        tried.append(cfg.symbol)
+        if cfg.symbol == "DHFL":
+            raise RuntimeError("delisted from NSE")
+        return load_synthetic(cfg.symbol, days=400, start_price=200.0)
+
+    monkeypatch.setattr("algobot.data.universe.load_prices", fake)
+    result = load_universe(["DHFL"], strict=True)
+
+    assert result.loaded == ["DHFL"]
+    assert tried == ["DHFL", BSE_FALLBACK["DHFL"]]
+
+
+def test_symbol_with_no_listing_anywhere_is_reported_missing(monkeypatch):
+    def fake(cfg, *a, **k):
+        raise RuntimeError("gone")
+
+    monkeypatch.setattr("algobot.data.universe.load_prices", fake)
+    result = load_universe(["PUNJLLOYD"], strict=True)
+
+    assert result.loaded == []
+    assert result.missing == ["PUNJLLOYD"]
+
+
+def test_every_casualty_has_a_fallback_or_is_declared_unavailable():
+    """No casualty may disappear without being accounted for somewhere."""
+    from algobot.data.universe import BSE_FALLBACK, NO_DATA_ANYWHERE
+
+    for sym in CASUALTIES_2016:
+        assert sym in BSE_FALLBACK or sym in NO_DATA_ANYWHERE or sym in (
+            "RCOM", "RELCAPITAL", "JETAIRWAYS", "MANPASAND", "COFFEEDAY"
+        ), f"{sym} would vanish silently"
+
+
+def test_a_degenerate_download_does_not_block_the_fallback(monkeypatch):
+    """Regression: a 1-row NSE stub was cached and hid the BSE listing.
+
+    The stub short-circuited both the cache and the fallback chain, so three
+    casualties silently vanished from the universe.
+    """
+    import pandas as pd
+
+    from algobot.config import DataConfig
+    from algobot.data.loader import MIN_USABLE_ROWS, load_prices
+
+    stub = pd.DataFrame(
+        {"Open": [1.0], "High": [1.0], "Low": [1.0], "Close": [1.0], "Volume": [1]},
+        index=pd.DatetimeIndex([pd.Timestamp("2020-01-01")], name="Date"),
+    )
+    monkeypatch.setattr("algobot.data.loader._load_yahoo", lambda cfg: stub)
+
+    assert MIN_USABLE_ROWS > 1
+    with pytest.raises(RuntimeError):
+        load_prices(DataConfig(symbol="STUB", period="1y", source="yahoo",
+                               use_cache=False, allow_synthetic_fallback=False))
+
+
+def test_degenerate_frames_are_never_cached(monkeypatch, tmp_path):
+    import pandas as pd
+
+    from algobot.config import DataConfig
+    from algobot.data import loader as L
+
+    stub = pd.DataFrame(
+        {"Open": [1.0], "High": [1.0], "Low": [1.0], "Close": [1.0], "Volume": [1]},
+        index=pd.DatetimeIndex([pd.Timestamp("2020-01-01")], name="Date"),
+    )
+    monkeypatch.setattr(L, "_load_yahoo", lambda cfg: stub)
+    monkeypatch.setattr(L, "_cache_path", lambda *a, **k: tmp_path / "stub.csv")
+
+    try:
+        L.load_prices(DataConfig(symbol="STUB2", period="1y", source="yahoo",
+                                 use_cache=True, allow_synthetic_fallback=False))
+    except RuntimeError:
+        pass
+    assert not (tmp_path / "stub.csv").exists(), "a failed download must not be cached"

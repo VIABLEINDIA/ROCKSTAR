@@ -24,6 +24,12 @@ log = logging.getLogger(__name__)
 
 OHLCV = ["Open", "High", "Low", "Close", "Volume"]
 
+# A frame this short is a failed download, not a short listing. Treating it as
+# data poisons the cache and, worse, short-circuits the fallback chain: a
+# 1-row NSE stub for a delisted company would hide the BSE listing that
+# actually has its history.
+MIN_USABLE_ROWS = 20
+
 _PERIOD_DAYS = {
     "1mo": 30, "3mo": 91, "6mo": 182, "1y": 365, "2y": 730,
     "5y": 1826, "10y": 3653, "max": 7305,
@@ -143,8 +149,11 @@ def _load_yahoo(cfg: DataConfig) -> pd.DataFrame:
         progress=False,
         threads=False,
     )
-    if df is None or df.empty:
-        raise RuntimeError(f"Yahoo Finance returned no rows for {ticker}")
+    if df is None or len(df) < MIN_USABLE_ROWS:
+        raise RuntimeError(
+            f"Yahoo Finance returned {0 if df is None else len(df)} rows for {ticker} "
+            f"(need >= {MIN_USABLE_ROWS}); treating as unavailable"
+        )
     return _normalise(df)
 
 
@@ -217,7 +226,7 @@ def load_prices(cfg: DataConfig, creds: DhanCredentials | None = None) -> pd.Dat
     if cfg.use_cache and cache.exists():
         log.info("Loading cached bars from %s", cache)
         df = pd.read_csv(cache, index_col="Date", parse_dates=["Date"])
-        if not df.empty:
+        if len(df) >= MIN_USABLE_ROWS:
             out = _normalise(df)
             out.attrs["source"] = f"cache:{cfg.source}"
             out.attrs["symbol"] = cfg.symbol
@@ -254,9 +263,17 @@ def load_prices(cfg: DataConfig, creds: DhanCredentials | None = None) -> pd.Dat
             df = _load_synthetic_for(cfg)
             used = "synthetic"
 
+    if len(df) < MIN_USABLE_ROWS:
+        # Central guard: whatever the source, a frame this short is a failed
+        # download and must not be cached or returned as data.
+        raise RuntimeError(
+            f"Only {len(df)} rows for {cfg.symbol!r} from {used} "
+            f"(need >= {MIN_USABLE_ROWS}); treating as unavailable"
+        )
+
     df.attrs["source"] = used          # provenance: what actually produced these bars
     df.attrs["symbol"] = cfg.symbol
-    if cfg.use_cache:
+    if cfg.use_cache and len(df) >= MIN_USABLE_ROWS:
         df.to_csv(cache)
     return df
 
