@@ -16,6 +16,7 @@ import argparse
 import json
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -83,6 +84,70 @@ def cmd_fetch(args, cfg: Config) -> int:
     print(f"\n{cfg.data.symbol.upper()}  source={cfg.data.source}  rows={len(df)}  "
           f"{df.index[0].date()} -> {df.index[-1].date()}\n")
     print(df.tail(10).round(2).to_string())
+    return 0
+
+
+def cmd_auth(args, cfg: Config) -> int:
+    """Check Dhan credentials end to end without ever printing them."""
+    from .broker.dhan import DhanBroker, token_expiry, token_is_expired
+
+    creds = cfg.dhan
+    env_file = ARTIFACT_DIR.parent / ".env"
+
+    # Only ever report presence and length -- a credential check that prints
+    # the credential defeats its own purpose.
+    token_state = f"set ({len(creds.access_token)} chars)" if creds.access_token else "MISSING"
+
+    print(f"\n.env file            {'found' if env_file.exists() else 'not found'} ({env_file})")
+    print(f"DHAN_ACCESS_TOKEN    {token_state}")
+    print(f"DHAN_CLIENT_ID       {'set' if creds.client_id else 'MISSING'}")
+    print(f"Base URL             {creds.base_url}")
+
+    expiry = token_expiry(creds.access_token)
+    if expiry is not None:
+        expired = token_is_expired(creds.access_token)
+        age = (expiry - datetime.now(timezone.utc)).total_seconds() / 3600
+        state = f"EXPIRED {abs(age):.1f}h ago" if expired else f"valid for {age:.1f}h"
+        print(f"Token expiry         {expiry:%Y-%m-%d %H:%M UTC} -- {state}")
+        if expired:
+            print("\nThe token is expired. Dhan access tokens last about 24 hours.")
+            print("Regenerate under Profile -> DhanHQ Trading API, then update .env "
+                  "and rerun this command.")
+            return 1
+
+    if not creds.configured:
+        print("\nBoth DHAN_ACCESS_TOKEN and DHAN_CLIENT_ID are required.")
+        print("Put them in .env (see .env.example) or export them, then rerun.")
+        return 1
+
+    print("\nCalling Dhan...")
+    try:
+        broker = DhanBroker(creds, dry_run=True)
+        account = broker.account()
+        print(f"  funds        OK -- cash {money(account.cash, 'INR')}")
+    except Exception as exc:
+        print(f"  funds        FAILED: {str(exc)[:160]}")
+        if "DH-901" in str(exc):
+            print("\nDH-901 means the token is invalid or expired. Dhan access tokens are "
+                  "short-lived:\nregenerate under Profile -> DhanHQ Trading API and "
+                  "update .env.")
+        return 1
+
+    try:
+        bars = broker.history(cfg.data.symbol, lookback_days=30)
+        print(f"  daily candles OK -- {len(bars)} bars for {cfg.data.symbol.upper()}, "
+              f"latest {bars.index[-1].date()}")
+    except Exception as exc:
+        print(f"  daily candles FAILED: {str(exc)[:160]}")
+        return 1
+
+    try:
+        print(f"  live LTP      OK -- {cfg.data.symbol.upper()} "
+              f"{money(broker.last_price(cfg.data.symbol), 'INR')}")
+    except Exception as exc:
+        print(f"  live LTP      unavailable: {str(exc)[:120]}")
+
+    print("\nCredentials work. --source dhan will now use Dhan data.")
     return 0
 
 
@@ -476,6 +541,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("fetch", help="download and cache OHLCV bars")
     common(p)
     p.set_defaults(func=cmd_fetch)
+
+    p = sub.add_parser("auth", help="verify Dhan credentials (never prints them)")
+    common(p)
+    p.set_defaults(func=cmd_auth)
 
     p = sub.add_parser("symbols", help="resolve or search Dhan security ids")
     common(p)

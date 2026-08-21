@@ -191,3 +191,66 @@ def test_journal_records_the_product_type(broker, tmp_path):
     bot = make_bot(broker, tmp_path, product_type="INTRADAY")
     payload = json.loads(bot.save_journal().read_text(encoding="utf-8"))
     assert payload["product_type"] == "INTRADAY"
+
+
+# ----------------------------------------------------------------------
+# access-token expiry
+# ----------------------------------------------------------------------
+def make_jwt(exp_epoch: int | None) -> str:
+    """A JWT-shaped token with the given exp claim. Signature is irrelevant:
+    only the payload is read, and never sent anywhere."""
+    import base64
+    import json as _json
+
+    def seg(obj):
+        raw = _json.dumps(obj).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    claims = {"dhanClientId": "X", "iss": "dhan"}
+    if exp_epoch is not None:
+        claims["exp"] = exp_epoch
+    return f"{seg({'alg': 'HS256'})}.{seg(claims)}.signature"
+
+
+def test_expiry_is_read_from_the_token():
+    from datetime import datetime, timezone
+
+    from algobot.broker.dhan import token_expiry
+
+    exp = int(datetime(2026, 8, 20, 16, 10, tzinfo=timezone.utc).timestamp())
+    assert token_expiry(make_jwt(exp)) == datetime(2026, 8, 20, 16, 10, tzinfo=timezone.utc)
+
+
+def test_expired_and_valid_tokens_are_distinguished():
+    from datetime import datetime, timedelta, timezone
+
+    from algobot.broker.dhan import token_is_expired
+
+    now = datetime.now(timezone.utc)
+    past = int((now - timedelta(hours=1)).timestamp())
+    future = int((now + timedelta(hours=10)).timestamp())
+
+    assert token_is_expired(make_jwt(past)) is True
+    assert token_is_expired(make_jwt(future)) is False
+
+
+def test_unreadable_tokens_return_none_rather_than_guessing():
+    """An opaque token must not be reported as valid or expired."""
+    from algobot.broker.dhan import token_expiry, token_is_expired
+
+    for junk in ("", "not-a-jwt", "a.b", "a.b.c.d", "!!!.???.***"):
+        assert token_expiry(junk) is None
+        assert token_is_expired(junk) is None
+
+
+def test_token_without_exp_claim_returns_none():
+    from algobot.broker.dhan import token_expiry
+
+    assert token_expiry(make_jwt(None)) is None
+
+
+def test_expiry_check_never_returns_the_token():
+    from algobot.broker.dhan import token_expiry
+
+    secret = make_jwt(1_800_000_000)
+    assert secret not in str(token_expiry(secret))

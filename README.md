@@ -94,6 +94,7 @@ Gold Cross (`gold`).
 | Command | Purpose |
 |---|---|
 | `fetch` | Download and cache OHLCV bars |
+| `auth` | Verify Dhan credentials and token expiry (never prints them) |
 | `symbols` | Resolve or search Dhan `securityId`s |
 | `train` | Train the Random Forest, print Section V metrics, save a joblib bundle |
 | `backtest` | One strategy over one window |
@@ -469,8 +470,26 @@ set (section 8) is what changes the answer.
 cp .env.example .env      # then fill in your credentials
 ```
 
-Set `DHAN_ACCESS_TOKEN` and `DHAN_CLIENT_ID` in the environment (tokens are generated in the Dhan
-app under *DhanHQ Trading API* and expire, typically daily). Then:
+Put `DHAN_ACCESS_TOKEN` and `DHAN_CLIENT_ID` in `.env` (gitignored) or export them. The file is
+loaded automatically at import, so credentials survive between shells — an `export` does not.
+
+Check them before anything else:
+
+```bash
+python -m algobot.cli auth
+```
+
+`auth` reports presence and length only, never the values. Dhan access tokens are JWTs valid for
+about **24 hours**, and an expired one fails every endpoint with the same `DH-901` as a wrong client
+id — so `auth` reads the `exp` claim locally and tells you which it is before making a call:
+
+```
+DHAN_ACCESS_TOKEN    set (280 chars)
+DHAN_CLIENT_ID       set
+Token expiry         2026-08-20 16:10 UTC -- EXPIRED 15.2h ago
+```
+
+Regenerate under *Profile → DhanHQ Trading API* when that happens. Then:
 
 ```bash
 python -m algobot.cli fetch --symbol TCS --source dhan
@@ -541,7 +560,7 @@ If the market closes while a position is still open, the bot logs it as an **err
 python -m pytest tests/ -q
 ```
 
-259 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
+270 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
 regime shift, look-ahead leakage in every strategy, execution timing, stop-loss and slippage
 mechanics, strike-rate/profit maths, model persistence, the DhanHQ v2 order-body contract, the
 live-order guard, all three bot stop conditions, and the CLI.
@@ -568,7 +587,7 @@ algobot/
   backtest/            execution engine, costs, Tables 3-6 reporting, permutation test
   broker/              base interface, DhanHQ v2 client, simulated + replay brokers
   bot/                 live trading loop and risk guards
-tests/                 259 tests
+tests/                 270 tests
 artifacts/             generated charts, tables, journals  (git-ignored)
 models/                joblib bundles                      (git-ignored)
 cache/                 downloaded bars, scrip master, paper ledger (git-ignored)

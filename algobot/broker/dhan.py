@@ -19,7 +19,9 @@ describes.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, time, timedelta
+import base64
+import json
+from datetime import date, datetime, time, timedelta, timezone
 
 import pandas as pd
 
@@ -53,6 +55,37 @@ def is_nse_session(ts: datetime | None = None) -> bool:
     if ts.weekday() >= 5:
         return False
     return NSE_OPEN <= ts.time() <= NSE_CLOSE
+
+
+def token_expiry(access_token: str) -> datetime | None:
+    """Expiry time encoded in a DhanHQ access token, or None if unreadable.
+
+    Dhan tokens are JWTs valid for about 24 hours, and an expired one fails
+    every endpoint with the same DH-901 as a wrong client id -- so reading the
+    `exp` claim locally turns a confusing auth error into a definite answer.
+
+    Only the timing claim is read; the token itself is never logged or
+    returned.
+    """
+    parts = str(access_token).split(".")
+    if len(parts) != 3:
+        return None
+    payload = parts[1]
+    payload += "=" * (-len(payload) % 4)          # restore base64url padding
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+        exp = claims.get("exp")
+        return datetime.fromtimestamp(float(exp), tz=timezone.utc) if exp else None
+    except (ValueError, TypeError, json.JSONDecodeError, base64.binascii.Error):
+        return None
+
+
+def token_is_expired(access_token: str, now: datetime | None = None) -> bool | None:
+    """True/False if the expiry is readable, None if it cannot be determined."""
+    expiry = token_expiry(access_token)
+    if expiry is None:
+        return None
+    return expiry <= (now or datetime.now(timezone.utc))
 
 
 def parse_ist_time(value: str) -> time:

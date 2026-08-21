@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pandas as pd
 import pytest
@@ -266,3 +267,74 @@ def test_cli_reports_a_bad_strategy():
 
     with pytest.raises(SystemExit):
         main(["backtest", "--strategy", "nonsense"])
+
+
+# ----------------------------------------------------------------------
+# .env credential loading
+# ----------------------------------------------------------------------
+def test_dotenv_sets_missing_variables(tmp_path, monkeypatch):
+    from algobot.config import load_dotenv
+
+    env = tmp_path / ".env"
+    env.write_text('DHAN_ACCESS_TOKEN=abc123\nDHAN_CLIENT_ID="cli456"\n', encoding="utf-8")
+    monkeypatch.delenv("DHAN_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("DHAN_CLIENT_ID", raising=False)
+
+    loaded = load_dotenv(env)
+    assert set(loaded) == {"DHAN_ACCESS_TOKEN", "DHAN_CLIENT_ID"}
+    assert os.environ["DHAN_ACCESS_TOKEN"] == "abc123"
+    assert os.environ["DHAN_CLIENT_ID"] == "cli456"      # quotes stripped
+
+
+def test_dotenv_returns_names_never_values(tmp_path, monkeypatch):
+    """A caller must be able to confirm what loaded without logging a secret."""
+    from algobot.config import load_dotenv
+
+    env = tmp_path / ".env"
+    env.write_text("DHAN_ACCESS_TOKEN=super-secret-value\n", encoding="utf-8")
+    monkeypatch.delenv("DHAN_ACCESS_TOKEN", raising=False)
+
+    assert load_dotenv(env) == ["DHAN_ACCESS_TOKEN"]
+    assert "super-secret-value" not in str(load_dotenv(env))
+
+
+def test_existing_environment_wins_by_default(tmp_path, monkeypatch):
+    from algobot.config import load_dotenv
+
+    env = tmp_path / ".env"
+    env.write_text("DHAN_CLIENT_ID=from-file\n", encoding="utf-8")
+    monkeypatch.setenv("DHAN_CLIENT_ID", "from-shell")
+
+    load_dotenv(env)
+    assert os.environ["DHAN_CLIENT_ID"] == "from-shell"
+
+    load_dotenv(env, override=True)
+    assert os.environ["DHAN_CLIENT_ID"] == "from-file"
+
+
+def test_dotenv_ignores_comments_and_blank_lines(tmp_path, monkeypatch):
+    from algobot.config import load_dotenv
+
+    env = tmp_path / ".env"
+    env.write_text("# a comment\n\nDHAN_CLIENT_ID=x\nnot-a-pair\n", encoding="utf-8")
+    monkeypatch.delenv("DHAN_CLIENT_ID", raising=False)
+
+    assert load_dotenv(env) == ["DHAN_CLIENT_ID"]
+
+
+def test_missing_dotenv_is_not_an_error(tmp_path):
+    from algobot.config import load_dotenv
+
+    assert load_dotenv(tmp_path / "nope.env") == []
+
+
+def test_credentials_are_picked_up_from_dotenv(tmp_path, monkeypatch):
+    from algobot.config import DhanCredentials, load_dotenv
+
+    env = tmp_path / ".env"
+    env.write_text("DHAN_ACCESS_TOKEN=t\nDHAN_CLIENT_ID=c\n", encoding="utf-8")
+    monkeypatch.delenv("DHAN_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("DHAN_CLIENT_ID", raising=False)
+
+    load_dotenv(env)
+    assert DhanCredentials().configured

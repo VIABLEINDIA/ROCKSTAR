@@ -8,6 +8,7 @@ documented defaults where it is not.
 from __future__ import annotations
 
 import os
+import pathlib
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
@@ -18,6 +19,41 @@ ARTIFACT_DIR = ROOT / "artifacts"
 
 for _d in (CACHE_DIR, MODEL_DIR, ARTIFACT_DIR):
     _d.mkdir(exist_ok=True)
+
+
+def load_dotenv(path: str | os.PathLike | None = None, override: bool = False) -> list[str]:
+    """Read KEY=VALUE lines from a .env file into the environment.
+
+    Credentials belong in a gitignored file rather than in the shell history or
+    the repository, and a file survives across processes where an `export` in
+    one shell does not.
+
+    Returns the names of the keys that were set -- never the values, so a
+    caller can confirm what loaded without a secret reaching a log.
+    Pre-existing environment variables win unless `override` is set.
+    """
+    path = pathlib.Path(path) if path else ROOT / ".env"
+    if not path.exists():
+        return []
+
+    loaded = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if not key or (key in os.environ and not override):
+            continue
+        os.environ[key] = value
+        loaded.append(key)
+    return loaded
+
+
+# Loaded at import so every entry point -- CLI, tests, notebooks -- sees the
+# same credentials without each having to remember to call it.
+load_dotenv()
 
 
 @dataclass
