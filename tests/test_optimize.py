@@ -231,3 +231,45 @@ def test_random_baseline_is_reproducible(prices):
     a = random_parameter_baseline(prices.iloc[:cut], prices.iloc[cut:], "gold", **kw)
     b = random_parameter_baseline(prices.iloc[:cut], prices.iloc[cut:], "gold", **kw)
     assert np.allclose(a["profits"], b["profits"])
+
+
+# ----------------------------------------------------------------------
+# intraday grids
+# ----------------------------------------------------------------------
+def test_intraday_grids_cover_every_strategy():
+    from algobot.backtest.optimize import INTRADAY_PARAM_GRIDS
+
+    assert set(INTRADAY_PARAM_GRIDS) == set(PARAM_GRIDS)
+
+
+def test_intraday_windows_are_shorter_than_daily():
+    """A 200-bar average on hourly data is a 29-session average, not intraday."""
+    from algobot.backtest.optimize import INTRADAY_PARAM_GRIDS
+
+    assert max(INTRADAY_PARAM_GRIDS["ma"]["slow"]) < max(PARAM_GRIDS["ma"]["slow"])
+    assert max(INTRADAY_PARAM_GRIDS["donchian"]["entry_window"]) < \
+        max(PARAM_GRIDS["donchian"]["entry_window"])
+
+
+def test_intraday_stops_are_tighter():
+    """A 12% stop is unreachable inside a session, so it is no stop at all."""
+    from algobot.backtest.optimize import INTRADAY_STOP_LOSS_GRID
+
+    finite_intraday = [s for s in INTRADAY_STOP_LOSS_GRID if s]
+    finite_daily = [s for s in STOP_LOSS_GRID if s]
+    assert max(finite_intraday) < max(finite_daily)
+
+
+def test_grids_for_switches_on_the_flag():
+    from algobot.backtest.optimize import INTRADAY_PARAM_GRIDS, grids_for
+
+    assert grids_for(intraday=True)[0] is INTRADAY_PARAM_GRIDS
+    assert grids_for(intraday=False)[0] is PARAM_GRIDS
+
+
+def test_intraday_search_uses_the_intraday_grid(prices):
+    from algobot.backtest.optimize import INTRADAY_PARAM_GRIDS, _combinations
+
+    rows = grid_search(prices, "gold", BacktestConfig(), "profit",
+                       search_stop_loss=False, intraday=True)
+    assert len(rows) == len(_combinations(INTRADAY_PARAM_GRIDS["gold"], False))

@@ -38,6 +38,37 @@ def period_to_days(period: str) -> int:
     raise ValueError(f"Unsupported period {period!r}")
 
 
+# Yahoo caps how far back intraday bars go, by interval.
+YAHOO_INTRADAY_MAX_DAYS = {
+    "1m": 7, "2m": 60, "5m": 60, "15m": 60, "30m": 60, "90m": 60, "60m": 730, "1h": 730,
+}
+
+
+def is_intraday(interval: str) -> bool:
+    return not str(interval).lower().endswith(("d", "wk", "mo"))
+
+
+def clamp_period(period: str, interval: str) -> str:
+    """Shrink a period Yahoo will not serve at this interval.
+
+    Asking for 10y of 5-minute bars returns an empty frame rather than an
+    error, which then looks like a dead symbol. Clamping makes the limit
+    visible instead.
+    """
+    cap = YAHOO_INTRADAY_MAX_DAYS.get(str(interval).lower())
+    if cap is None:
+        return period
+    try:
+        wanted = period_to_days(period)
+    except ValueError:
+        return period
+    if wanted <= cap:
+        return period
+    log.warning("Yahoo serves at most %d days of %s bars; clamping period %s -> %dd",
+                cap, interval, period, cap)
+    return f"{cap}d"
+
+
 def _cache_path(symbol: str, period: str, interval: str, source: str) -> Path:
     return CACHE_DIR / f"{symbol.upper()}_{source}_{period}_{interval}.csv"
 
@@ -106,7 +137,7 @@ def _load_yahoo(cfg: DataConfig) -> pd.DataFrame:
 
     df = yf.download(
         ticker,
-        period=cfg.period,
+        period=clamp_period(cfg.period, cfg.interval),
         interval=cfg.interval,
         auto_adjust=False,
         progress=False,
@@ -172,8 +203,10 @@ def _load_dhan(cfg: DataConfig, creds: DhanCredentials | None = None) -> pd.Data
     )
     ts = payload.get("timestamp") or payload.get("start_Time")
     df.index = pd.to_datetime(pd.Series(ts, dtype="float64"), unit="s", utc=True)
-    # Dhan stamps candles in IST; normalise to the local trading date.
-    df.index = df.index.tz_convert("Asia/Kolkata").tz_localize(None).normalize()
+    df.index = df.index.tz_convert("Asia/Kolkata").tz_localize(None)
+    # Only daily candles collapse to a date; intraday must keep time of day.
+    if not is_intraday(cfg.interval):
+        df.index = df.index.normalize()
     return _normalise(df)
 
 

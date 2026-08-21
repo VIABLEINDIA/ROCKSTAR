@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -344,3 +345,56 @@ def test_take_profit_is_not_credited_for_a_favourable_gap():
                      BacktestConfig(quantity=10, stop_loss_pct=0.0, take_profit_pct=0.10,
                                     cost_model="none", slippage_bps=0))
     assert r.trades[0].exit_price == pytest.approx(110.0)   # the target, not 130
+
+
+# ----------------------------------------------------------------------
+# intraday session handling
+# ----------------------------------------------------------------------
+def intraday_frame(sessions: int = 3, bars: int = 7) -> pd.DataFrame:
+    """NSE-shaped hourly bars: `bars` per session, 09:15 onwards."""
+    stamps = []
+    for d in range(sessions):
+        day = pd.Timestamp("2024-01-01") + pd.Timedelta(d, unit="D")
+        stamps += [day + pd.Timedelta(hours=9, minutes=15) + pd.Timedelta(h, unit="h")
+                   for h in range(bars)]
+    idx = pd.DatetimeIndex(stamps)
+    price = pd.Series(np.linspace(100, 120, len(idx)), index=idx)
+    return pd.DataFrame({"Open": price, "High": price, "Low": price,
+                         "Close": price, "Volume": 1_000}, index=idx)
+
+
+def test_square_off_closes_at_each_session_end():
+    df = intraday_frame(sessions=3)
+    signals = [LONG] + [FLAT] * (len(df) - 1)
+    r = run_backtest(df, ScriptedStrategy(signals),
+                     BacktestConfig(quantity=10, stop_loss_pct=0.0, cost_model="none",
+                                    slippage_bps=0, intraday_square_off=True))
+    assert r.trades
+    assert r.trades[0].exit_reason == "square_off"
+    # The exit lands on the last bar of the entry's own session.
+    assert r.trades[0].exit_date.date() == r.trades[0].entry_date.date()
+
+
+def test_without_square_off_the_position_is_carried():
+    df = intraday_frame(sessions=3)
+    signals = [LONG] + [FLAT] * (len(df) - 1)
+    r = run_backtest(df, ScriptedStrategy(signals),
+                     BacktestConfig(quantity=10, stop_loss_pct=0.0, cost_model="none",
+                                    slippage_bps=0, intraday_square_off=False))
+    assert r.trades[0].exit_reason == "end_of_test"
+    assert r.trades[0].exit_date.date() > r.trades[0].entry_date.date()
+
+
+def test_square_off_is_off_by_default():
+    """Daily strategies must not be silently flattened every bar."""
+    assert BacktestConfig().intraday_square_off is False
+
+
+def test_square_off_never_carries_a_position_overnight():
+    df = intraday_frame(sessions=4)
+    signals = [LONG, FLAT, LONG, FLAT] * len(df)
+    r = run_backtest(df, ScriptedStrategy(signals[: len(df)]),
+                     BacktestConfig(quantity=10, stop_loss_pct=0.0, cost_model="intraday",
+                                    slippage_bps=0, intraday_square_off=True))
+    for trade in r.trades:
+        assert trade.entry_date.date() == trade.exit_date.date()

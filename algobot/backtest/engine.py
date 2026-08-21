@@ -238,6 +238,13 @@ def run_backtest(df: pd.DataFrame, strategy: Strategy, cfg: BacktestConfig | Non
     sig = signals.to_numpy()
     dates = df.index
 
+    # Last bar of each trading session, for the intraday square-off.
+    session_end = np.zeros(len(df), dtype=bool)
+    if cfg.intraday_square_off and len(df):
+        session = pd.Index(dates).normalize()
+        session_end = (session != np.roll(session, -1))
+        session_end[-1] = True
+
     def close_position(i: int, price: float, reason: str) -> None:
         nonlocal cash, position, entry_price, entry_date, entry_charges
         side = "long" if position > 0 else "short"
@@ -307,9 +314,13 @@ def run_backtest(df: pd.DataFrame, strategy: Strategy, cfg: BacktestConfig | Non
                 if position == 0 and cfg.allow_short:
                     open_position(i, price, -1)
 
+        # 3. Intraday square-off: the broker will not carry this overnight.
+        if position != 0 and session_end[i]:
+            close_position(i, closes[i], "square_off")
+
         equity_rows.append(cash + position * closes[i])
 
-    # 3. Close anything still open on the final bar, so every trade is realised.
+    # 4. Close anything still open on the final bar, so every trade is realised.
     if position != 0:
         close_position(len(df) - 1, closes[-1], "end_of_test")
         equity_rows[-1] = cash

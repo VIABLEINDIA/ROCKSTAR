@@ -54,6 +54,44 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
     },
 }
 
+# Intraday grids are expressed in *bars*, not days. On NSE hourly data a
+# session is 7 bars, so these span roughly half a session to two weeks --
+# the daily grids (up to a 200-bar slow average) would be a 29-session
+# average on hourly data, which is not an intraday strategy at all.
+INTRADAY_PARAM_GRIDS: dict[str, dict[str, list]] = {
+    "ma": {
+        "fast": [3, 5, 7, 10, 14],
+        "slow": [14, 21, 35, 70],
+        "use_ema": [False, True],
+    },
+    "donchian": {
+        "entry_window": [7, 14, 21, 35],
+        "exit_window": [3, 7, 14],
+    },
+    "multiple": {
+        "fast": [5, 7, 14],
+        "slow": [21, 35, 70],
+        "min_votes": [1, 2, 3],
+    },
+    "gold": {
+        "fast": [7, 14],
+        "slow": [35, 70],
+    },
+}
+
+# Intraday stops are necessarily tighter: a 12% stop cannot be reached inside
+# a session, so it is the same as having no stop at all.
+INTRADAY_STOP_LOSS_GRID = [0.005, 0.01, 0.02, 0.03, None]
+INTRADAY_TAKE_PROFIT_GRID = [0.005, 0.01, 0.02, 0.03, None]
+
+
+def grids_for(intraday: bool) -> tuple[dict, list, list]:
+    """Parameter grid, stop-loss grid and take-profit grid for the bar size."""
+    if intraday:
+        return INTRADAY_PARAM_GRIDS, INTRADAY_STOP_LOSS_GRID, INTRADAY_TAKE_PROFIT_GRID
+    return PARAM_GRIDS, STOP_LOSS_GRID, TAKE_PROFIT_GRID
+
+
 # Stop-loss lives on BacktestConfig rather than the strategy, but it drives
 # results as hard as any strategy window, so it is searchable too.
 STOP_LOSS_GRID = [0.03, 0.05, 0.08, 0.12, None]
@@ -88,7 +126,7 @@ def score(result: BacktestResult, objective: str = "profit", min_trades: int = 5
 
 
 def _combinations(grid: dict[str, list], search_stop_loss: bool,
-                  search_take_profit: bool = False) -> list[dict]:
+                  search_take_profit: bool = False, intraday: bool = False) -> list[dict]:
     keys = list(grid)
     combos = [dict(zip(keys, values)) for values in itertools.product(*(grid[k] for k in keys))]
 
@@ -98,10 +136,11 @@ def _combinations(grid: dict[str, list], search_stop_loss: bool,
               and not ("entry_window" in c and "exit_window" in c
                        and c["exit_window"] > c["entry_window"])]
 
+    _, sl_grid, tp_grid = grids_for(intraday)
     if search_stop_loss:
-        combos = [{**c, "stop_loss_pct": sl} for c in combos for sl in STOP_LOSS_GRID]
+        combos = [{**c, "stop_loss_pct": sl} for c in combos for sl in sl_grid]
     if search_take_profit:
-        combos = [{**c, "take_profit_pct": tp} for c in combos for tp in TAKE_PROFIT_GRID]
+        combos = [{**c, "take_profit_pct": tp} for c in combos for tp in tp_grid]
     return combos
 
 
@@ -136,13 +175,14 @@ class SearchRow:
 def grid_search(df: pd.DataFrame, strategy: str, cfg: BacktestConfig | None = None,
                 objective: str = "profit", grid: dict | None = None,
                 search_stop_loss: bool = True, min_trades: int = 5,
-                symbol: str = "", search_take_profit: bool = False) -> list[SearchRow]:
+                symbol: str = "", search_take_profit: bool = False,
+                intraday: bool = False) -> list[SearchRow]:
     """Rank every combination on `df`. In-sample only -- never report this alone."""
     cfg = cfg or BacktestConfig()
-    grid = grid or PARAM_GRIDS[strategy]
+    grid = grid or grids_for(intraday)[0][strategy]
 
     rows: list[SearchRow] = []
-    for params in _combinations(grid, search_stop_loss, search_take_profit):
+    for params in _combinations(grid, search_stop_loss, search_take_profit, intraday):
         run_cfg, strat_params = _apply(cfg, params)
         result = run_backtest(df, build_strategy(strategy, **strat_params), run_cfg,
                               symbol, "search")
@@ -287,7 +327,8 @@ class WalkForwardReport:
 def walk_forward(df: pd.DataFrame, strategy: str, cfg: BacktestConfig | None = None,
                  objective: str = "profit", n_folds: int = 4, train_ratio: float = 0.5,
                  search_stop_loss: bool = True, symbol: str = "",
-                 search_take_profit: bool = False) -> WalkForwardReport:
+                 search_take_profit: bool = False,
+                 intraday: bool = False) -> WalkForwardReport:
     """Re-optimise at each fold and trade the next one.
 
     Every reported trade comes from parameters fitted only on data before it,
@@ -313,7 +354,7 @@ def walk_forward(df: pd.DataFrame, strategy: str, cfg: BacktestConfig | None = N
 
         rows = grid_search(train, strategy, cfg, objective,
                            search_stop_loss=search_stop_loss, symbol=symbol,
-                           search_take_profit=search_take_profit)
+                           search_take_profit=search_take_profit, intraday=intraday)
         rows = [r for r in rows if np.isfinite(r.objective)]
         if not rows:
             log.warning("Fold %d: no parameter set met the trade floor; using defaults", i + 1)

@@ -92,7 +92,7 @@ Run `python -m algobot.cli <command> --help` for the full flag list.
 
 ## Findings: where this reproduces the paper, and where it doesn't
 
-Six things in the paper's method do not survive contact with out-of-sample NSE data. Each is
+Seven things in the paper's method do not survive contact with out-of-sample NSE data. Each is
 implemented as described *and* addressed, with the fix documented and switchable.
 
 ### 1. Training on raw price levels cannot generalise
@@ -287,6 +287,35 @@ over the same windows.
 Neither objective produces a profitable system out-of-sample over these windows: tuning narrows the
 loss, it does not create an edge that was never there.
 
+### 7. Intraday is worse, not better
+
+The obvious response to "costs eat the edge" is to trade a bar size where costs are lower: MIS
+charges give a **0.106% breakeven** against delivery's 0.336%. So the strategies were retuned on
+**hourly NSE bars** (2 years, ~490 sessions x 7 bars), with intraday-scaled parameter grids, MIS
+costs, and a forced square-off at every session close — because Dhan closes MIS positions at the
+bell, and a test that carries them overnight measures a strategy the broker would never allow.
+
+Walk-forward, 3 symbols x 4 strategies:
+
+| Objective | Win rate | Net P&L | Trades |
+|---|---|---|---|
+| Default parameters | 32.3% | −₹33,055 | — |
+| Maximise profit | 34.11% | **−₹12,581** | 472 |
+| Maximise win rate | 36.92% | −₹75,709 | 1,571 |
+
+**1 of 24 tuned configurations was profitable** (TCS / Gold Cross, +₹470). Tuning for profit again
+narrows the loss — by ₹20,474 against defaults — without crossing into profit.
+
+Two things are worth drawing out. Cheaper per-trade costs did not help, because the moves captured
+shrank faster than the charges did, and the square-off truncates exactly the multi-day trends these
+strategies exist to ride. And targeting win rate failed on its own terms here: it reached only
+36.92%, because with a forced session-end exit a take-profit can no longer manufacture wins — it
+just tripled the trade count, and the costs with it.
+
+Intraday grids are expressed in bars, not days ([`optimize.py`](algobot/backtest/optimize.py)): a
+200-bar slow average on hourly data is a 29-session average, which is not an intraday strategy at
+all.
+
 ### Strategy results across three symbols
 
 `paper-run` output (10 shares/trade, 5% stop, strategies only — no model), **net of delivery
@@ -414,7 +443,7 @@ If the market closes while a position is still open, the bot logs it as an **err
 python -m pytest tests/ -q
 ```
 
-227 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
+236 tests covering lag construction and the `[0:33]` split, normalisation invariance under a price
 regime shift, look-ahead leakage in every strategy, execution timing, stop-loss and slippage
 mechanics, strike-rate/profit maths, model persistence, the DhanHQ v2 order-body contract, the
 live-order guard, all three bot stop conditions, and the CLI.
@@ -441,7 +470,7 @@ algobot/
   backtest/            execution engine, costs, Tables 3-6 reporting, permutation test
   broker/              base interface, DhanHQ v2 client, simulated + replay brokers
   bot/                 live trading loop and risk guards
-tests/                 227 tests
+tests/                 236 tests
 artifacts/             generated charts, tables, journals  (git-ignored)
 models/                joblib bundles                      (git-ignored)
 cache/                 downloaded bars, scrip master, paper ledger (git-ignored)

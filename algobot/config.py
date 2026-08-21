@@ -90,6 +90,15 @@ class BacktestConfig:
     Set 0 to reproduce the paper's frictionless fills.
     """
 
+    intraday_square_off: bool = False
+    """Close any open position at the last bar of each session.
+
+    Required for an honest MIS backtest: Dhan force-closes intraday positions
+    at the bell, so a test that carries them overnight is measuring a strategy
+    the broker would never have let run. Ignored on daily bars, where every
+    bar is its own session.
+    """
+
     gap_through_stops: bool = True
     """Fill a stop at the open when the bar gapped through it.
 
